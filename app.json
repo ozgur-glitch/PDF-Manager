@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "PDF-Manager",
+    "slug": "pdf-manager",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "favicon": "./icon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "369e3cbb-fd21-4f42-b481-92e0d0a87f60"
+      }
+    },
+    "owner": "ozgcetin20"
+  }
+}
