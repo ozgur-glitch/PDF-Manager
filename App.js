@@ -12,6 +12,7 @@ import {
   SafeAreaView
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as DocumentPicker from 'expo-document-picker';
 import { StatusBar } from 'expo-status-bar';
 
 const STORAGE_KEY = '@pdf_manager_files';
@@ -19,8 +20,8 @@ const STORAGE_KEY = '@pdf_manager_files';
 export default function App() {
   const [pdfs, setPdfs] = useState([]);
   const [title, setTitle] = useState('');
-  const [url, setUrl] = useState('');
   const [category, setCategory] = useState('Allgemein');
+  const [selectedFile, setSelectedFile] = useState(null);
 
   useEffect(() => {
     loadPdfs();
@@ -45,16 +46,38 @@ export default function App() {
     }
   };
 
+  // Funktion zum Auswählen einer PDF-Datei vom Smartphone
+  const pickDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        setSelectedFile(file);
+        // Automatisch den Dateinamen als Titel vorschlagen, falls leer
+        if (!title.trim()) {
+          setTitle(file.name.replace(/\.[^/.]+$/, ''));
+        }
+      }
+    } catch (error) {
+      Alert.alert('Fehler', 'Datei konnte nicht ausgewählt werden.');
+    }
+  };
+
   const addPdf = () => {
-    if (!title.trim() || !url.trim()) {
-      Alert.alert('Hinweis', 'Bitte Titel und URL/Pfad angeben.');
+    if (!title.trim() || !selectedFile) {
+      Alert.alert('Hinweis', 'Bitte einen Titel eingeben und eine PDF-Datei auswählen.');
       return;
     }
 
     const newPdf = {
       id: Date.now().toString(),
       title: title.trim(),
-      url: url.trim(),
+      uri: selectedFile.uri,
+      fileName: selectedFile.name,
       category: category.trim() || 'Allgemein',
       date: new Date().toLocaleDateString('de-DE')
     };
@@ -63,8 +86,9 @@ export default function App() {
     setPdfs(updatedPdfs);
     savePdfs(updatedPdfs);
 
+    // Felder zurücksetzen
     setTitle('');
-    setUrl('');
+    setSelectedFile(null);
   };
 
   const deletePdf = (id) => {
@@ -87,7 +111,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
-        <Text style={styles.headerSubtitle}>Dokumentenverwaltung leicht gemacht</Text>
+        <Text style={styles.headerSubtitle}>PDFs direkt vom Smartphone verwalten</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -95,22 +119,16 @@ export default function App() {
         style={styles.content}
       >
         <View style={styles.formCard}>
-          <Text style={styles.formTitle}>Neues Dokument hinzufügen</Text>
+          <Text style={styles.formTitle}>Neues PDF hinzufügen</Text>
+
           <TextInput
             style={styles.input}
-            placeholder="Dokumenttitel (z.B. Rechnung Januar)"
+            placeholder="Dokumenttitel (z.B. Rechnung)"
             placeholderTextColor="#888"
             value={title}
             onChangeText={setTitle}
           />
-          <TextInput
-            style={styles.input}
-            placeholder="PDF-Link / Speicherpfad (URL)"
-            placeholderTextColor="#888"
-            value={url}
-            onChangeText={setUrl}
-            autoCapitalize="none"
-          />
+
           <TextInput
             style={styles.input}
             placeholder="Kategorie (z.B. Arbeit, Privat)"
@@ -118,8 +136,15 @@ export default function App() {
             value={category}
             onChangeText={setCategory}
           />
+
+          <TouchableOpacity style={styles.filePickerButton} onPress={pickDocument}>
+            <Text style={styles.filePickerButtonText}>
+              {selectedFile ? `📁 ${selectedFile.name}` : '📂 PDF-Datei vom Smartphone wählen'}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.addButton} onPress={addPdf}>
-            <Text style={styles.addButtonText}>PDF Hinzufügen</Text>
+            <Text style={styles.addButtonText}>PDF Speichern</Text>
           </TouchableOpacity>
         </View>
 
@@ -133,7 +158,7 @@ export default function App() {
             <View style={styles.pdfCard}>
               <View style={styles.pdfInfo}>
                 <Text style={styles.pdfTitle}>{item.title}</Text>
-                <Text style={styles.pdfUrl} numberOfLines={1}>{item.url}</Text>
+                <Text style={styles.pdfUrl} numberOfLines={1}>{item.fileName}</Text>
                 <View style={styles.badgeRow}>
                   <Text style={styles.badge}>{item.category}</Text>
                   <Text style={styles.dateText}>{item.date}</Text>
@@ -208,6 +233,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1f2937',
     marginBottom: 10,
+  },
+  filePickerButton: {
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  filePickerButtonText: {
+    color: '#1d4ed8',
+    fontSize: 14,
+    fontWeight: '500',
   },
   addButton: {
     backgroundColor: '#2563eb',
