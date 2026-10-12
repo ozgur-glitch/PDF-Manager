@@ -16,6 +16,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import { WebView } from 'react-native-webview';
 import { StatusBar } from 'expo-status-bar';
 import { PDFDocument, degrees } from 'pdf-lib';
 
@@ -27,7 +28,7 @@ export default function App() {
   const [category, setCategory] = useState('Allgemein');
   const [selectedFile, setSelectedFile] = useState(null);
 
-  // Zustand für die Live-Vorschau & das Bearbeiten
+  // Zustand für die echte Live-Vorschau
   const [previewItem, setPreviewItem] = useState(null);
   const [currentRotation, setCurrentRotation] = useState(0);
 
@@ -96,14 +97,11 @@ export default function App() {
     setSelectedFile(null);
   };
 
-  // Echter Android-Speicherdialog zum direkten Abspeichern im Handy-Ordner
   const savePdfToDeviceFolder = async (item) => {
     try {
       if (Platform.OS === 'android') {
         const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-        if (!permissions.granted) {
-          return;
-        }
+        if (!permissions.granted) return;
 
         const base64Data = await FileSystem.readAsStringAsync(item.uri, {
           encoding: FileSystem.EncodingType.Base64,
@@ -119,10 +117,7 @@ export default function App() {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        Alert.alert('Erfolg', 'PDF wurde erfolgreich im gewählten Handy-Ordner gespeichert!');
-      } else {
-        // Fallback für iOS (Teilen-Dialog zum Sichern in "Dateien")
-        Alert.alert('Info', 'Bitte wähle "In Dateien sichern" im Menü aus.');
+        Alert.alert('Erfolg', 'PDF wurde erfolgreich im Handy-Ordner gespeichert!');
       }
     } catch (error) {
       Alert.alert('Fehler', 'Speichern fehlgeschlagen.');
@@ -132,10 +127,10 @@ export default function App() {
   // Vorschau öffnen
   const openPreview = (item) => {
     setPreviewItem(item);
-    setCurrentRotation(0); // Startet bei 0 Grad Ansicht
+    setCurrentRotation(0);
   };
 
-  // Drehen in der Live-Vorschau (0° -> 90° -> 180° -> 270° -> 0°)
+  // PDF drehen mit Live-Auswirkung auf die Vorschau
   const rotateInPreview = async () => {
     if (!previewItem) return;
     try {
@@ -235,7 +230,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
-        <Text style={styles.headerSubtitle}>Mit Live-Vorschau & direktem Speichern</Text>
+        <Text style={styles.headerSubtitle}>Mit echter Dokumenten-Vorschau</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -293,7 +288,6 @@ export default function App() {
               </View>
 
               <View style={styles.actionButtons} onStartShouldSetResponder={() => true}>
-                {/* Direktes Speichern auf dem Handy */}
                 <TouchableOpacity
                   style={styles.iconButton}
                   onPress={() => savePdfToDeviceFolder(item)}
@@ -301,7 +295,6 @@ export default function App() {
                   <Text style={styles.iconText}>💾</Text>
                 </TouchableOpacity>
 
-                {/* Löschen */}
                 <TouchableOpacity
                   style={styles.deleteButton}
                   onPress={() => deletePdf(item.id)}
@@ -318,40 +311,39 @@ export default function App() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* LIVE-VORSCHAU MODAL */}
-      <Modal visible={previewItem !== null} animationType="slide" transparent={true}>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>🔍 Dokumentenvorschau</Text>
-            <Text style={styles.modalSubtitle} numberOfLines={1}>{previewItem?.title}</Text>
+      {/* ECHTE PDF-VORSCHAU MODAL */}
+      <Modal visible={previewItem !== null} animationType="slide" transparent={false}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle} numberOfLines={1}>{previewItem?.title}</Text>
+            <TouchableOpacity style={styles.closeTopButton} onPress={() => setPreviewItem(null)}>
+              <Text style={styles.closeTopButtonText}>✕ Schließen</Text>
+            </TouchableOpacity>
+          </View>
 
-            {/* Visuelle Box zur Vorschau der aktuellen Drehung */}
-            <View style={[styles.previewBox, { transform: [{ rotate: `${currentRotation}deg` }] }]}>
-              <Text style={styles.previewIcon}>📄</Text>
-              <Text style={styles.previewRotationText}>{currentRotation}° gedreht</Text>
-            </View>
+          {/* Zeigt das echte PDF direkt an */}
+          <View style={styles.pdfViewerContainer}>
+            {previewItem && (
+              <WebView
+                source={{ uri: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(previewItem.uri)}` }}
+                style={styles.webview}
+              />
+            )}
+          </View>
 
+          <View style={styles.modalFooter}>
             <TouchableOpacity style={styles.rotateModalButton} onPress={rotateInPreview}>
-              <Text style={styles.rotateModalButtonText}>🔄 Um 90° weiterdrehen</Text>
+              <Text style={styles.rotateModalButtonText}>🔄 Um 90° drehen ({currentRotation}°)</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.saveModalButton}
-              onPress={() => {
-                savePdfToDeviceFolder(previewItem);
-              }}
+              onPress={() => savePdfToDeviceFolder(previewItem)}
             >
               <Text style={styles.saveModalButtonText}>💾 Auf Handy speichern</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.closeModalButton}
-              onPress={() => setPreviewItem(null)}
-            >
-              <Text style={styles.closeModalButtonText}>Schließen</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
@@ -528,59 +520,48 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 20,
-    width: '100%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 5,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#1f2937',
-    marginBottom: 4,
+    flex: 1,
+    marginRight: 10,
   },
-  modalSubtitle: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginBottom: 20,
+  closeTopButton: {
+    padding: 6,
   },
-  previewBox: {
-    width: 160,
-    height: 220,
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  previewIcon: {
-    fontSize: 48,
-    marginBottom: 8,
-  },
-  previewRotationText: {
-    fontSize: 12,
+  closeTopButtonText: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#2563eb',
+    color: '#ef4444',
+  },
+  pdfViewerContainer: {
+    flex: 1,
+    backgroundColor: '#e5e7eb',
+  },
+  webview: {
+    flex: 1,
+  },
+  modalFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
   },
   rotateModalButton: {
     backgroundColor: '#2563eb',
     borderRadius: 8,
     paddingVertical: 12,
-    width: '100%',
     alignItems: 'center',
     marginBottom: 10,
   },
@@ -593,21 +574,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#10b981',
     borderRadius: 8,
     paddingVertical: 12,
-    width: '100%',
     alignItems: 'center',
-    marginBottom: 10,
   },
   saveModalButtonText: {
     color: '#ffffff',
     fontSize: 15,
-    fontWeight: '600',
-  },
-  closeModalButton: {
-    paddingVertical: 10,
-  },
-  closeModalButtonText: {
-    color: '#6b7280',
-    fontSize: 14,
     fontWeight: '600',
   },
 });
