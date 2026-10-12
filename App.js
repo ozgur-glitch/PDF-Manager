@@ -16,7 +16,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
-import { WebView } from 'react-native-webview';
+import Pdf from 'react-native-pdf';
 import { StatusBar } from 'expo-status-bar';
 import { PDFDocument, degrees } from 'pdf-lib';
 
@@ -28,7 +28,6 @@ export default function App() {
   const [category, setCategory] = useState('Allgemein');
   const [selectedFile, setSelectedFile] = useState(null);
 
-  // Zustand für die echte Live-Vorschau
   const [previewItem, setPreviewItem] = useState(null);
   const [currentRotation, setCurrentRotation] = useState(0);
 
@@ -124,13 +123,12 @@ export default function App() {
     }
   };
 
-  // Vorschau öffnen
   const openPreview = (item) => {
     setPreviewItem(item);
     setCurrentRotation(0);
   };
 
-  // PDF drehen mit Live-Auswirkung auf die Vorschau
+  // PDF drehen und live in der nativen Ansicht aktualisieren
   const rotateInPreview = async () => {
     if (!previewItem) return;
     try {
@@ -230,7 +228,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
-        <Text style={styles.headerSubtitle}>Mit echter Dokumenten-Vorschau</Text>
+        <Text style={styles.headerSubtitle}>Mit echtem nativen PDF-Viewer</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -274,7 +272,7 @@ export default function App() {
             </TouchableOpacity>
           )}
 
-          <Text style={styles.listHeading}>Gespeicherte Dokumente ({pdfs.length}) - Tippe zum Ansehen & Drehen:</Text>
+          <Text style={styles.listHeading}>Gespeicherte Dokumente ({pdfs.length}) - Tippe zum Ansehen:</Text>
 
           {pdfs.map((item) => (
             <TouchableOpacity key={item.id} style={styles.pdfCard} onPress={() => openPreview(item)}>
@@ -311,7 +309,7 @@ export default function App() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ECHTE PDF-VORSCHAU MODAL */}
+      {/* NATIVES PDF-VIEWER MODAL */}
       <Modal visible={previewItem !== null} animationType="slide" transparent={false}>
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
@@ -321,12 +319,12 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          {/* Zeigt das echte PDF direkt an */}
           <View style={styles.pdfViewerContainer}>
             {previewItem && (
-              <WebView
-                source={{ uri: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(previewItem.uri)}` }}
-                style={styles.webview}
+              <Pdf
+                trustAllCerts={false}
+                source={{ uri: previewItem.uri, cache: true }}
+                style={styles.pdfViewer}
               />
             )}
           </View>
@@ -549,8 +547,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#e5e7eb',
   },
-  webview: {
+  pdfViewer: {
     flex: 1,
+    width: '100%',
+    height: '100%',
   },
   modalFooter: {
     padding: 16,
