@@ -19,18 +19,23 @@ import { StatusBar } from 'expo-status-bar';
 import { PDFDocument, degrees } from 'pdf-lib';
 
 const STORAGE_KEY = '@pdf_manager_files';
+const THEME_KEY = '@pdf_manager_theme';
 
 export default function App() {
   const [pdfs, setPdfs] = useState([]);
   const [previewItem, setPreviewItem] = useState(null);
   const [currentRotation, setCurrentRotation] = useState(0);
 
-  // Modus für das Zusammenführen (Multi-Select)
+  // Darkmode State
+  const [isDarkMode, setIsDarkMode] = useState(false);
+
+  // Multi-Select / Merge State
   const [isMergingMode, setIsMergingMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState([]);
 
   useEffect(() => {
     loadPdfs();
+    loadTheme();
   }, []);
 
   const loadPdfs = async () => {
@@ -49,6 +54,26 @@ export default function App() {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newPdfs));
     } catch (error) {
       Alert.alert('Fehler', 'PDFs konnten nicht gespeichert werden.');
+    }
+  };
+
+  const loadTheme = async () => {
+    try {
+      const theme = await AsyncStorage.getItem(THEME_KEY);
+      if (theme !== null) {
+        setIsDarkMode(theme === 'dark');
+      }
+    } catch (error) {
+      // Standard: Light Mode
+    }
+  };
+
+  const toggleTheme = async (val) => {
+    setIsDarkMode(val);
+    try {
+      await AsyncStorage.setItem(THEME_KEY, val ? 'dark' : 'light');
+    } catch (error) {
+      // Fehler beim Speichern des Themes
     }
   };
 
@@ -110,7 +135,6 @@ export default function App() {
     setCurrentRotation(0);
   };
 
-  // Drehen nur in der Vorschau (ohne direkte permanente Speicherung in der Liste)
   const rotateInPreview = async () => {
     if (!previewItem) return;
     try {
@@ -135,14 +159,12 @@ export default function App() {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      // Nur Vorschau-URI anpassen
       setPreviewItem({ ...previewItem, uri: newUri });
     } catch (error) {
       Alert.alert('Fehler', 'Drehen fehlgeschlagen.');
     }
   };
 
-  // Permanent speichern nach dem Bearbeiten/Drehen
   const saveRotatedChanges = () => {
     if (!previewItem) return;
     const updatedPdfs = pdfs.map((p) => (p.id === previewItem.id ? previewItem : p));
@@ -222,20 +244,51 @@ export default function App() {
     ]);
   };
 
+  // Alle PDFs auf einmal löschen
+  const deleteAllPdfs = () => {
+    if (pdfs.length === 0) return;
+    Alert.alert(
+      'Alle löschen',
+      'Möchtest du wirklich ALLE gespeicherten PDFs unwiderruflich löschen?',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Alle Löschen',
+          style: 'destructive',
+          onPress: () => {
+            setPdfs([]);
+            savePdfs([]);
+            setSelectedForMerge([]);
+          },
+        },
+      ]
+    );
+  };
+
+  // Theme-abhängige Farbzuweisung
+  const currentStyles = isDarkMode ? darkStyles : lightStyles;
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="light" />
+    <SafeAreaView style={[styles.container, currentStyles.container]}>
+      <StatusBar style={isDarkMode ? 'light' : 'light'} />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Dark Mode Switch */}
+        <View style={[styles.cardRow, currentStyles.card]}>
+          <Text style={[styles.rowText, currentStyles.text]}>🌙 Dunkler Modus</Text>
+          <Switch value={isDarkMode} onValueChange={toggleTheme} />
+        </View>
+
+        {/* Action Buttons */}
         <TouchableOpacity style={styles.pickerButton} onPress={pickDocument}>
           <Text style={styles.pickerButtonText}>📂 PDFs auswählen & hinzufügen</Text>
         </TouchableOpacity>
 
-        <View style={styles.mergeControlRow}>
-          <Text style={styles.mergeControlText}>Mehrere PDFs zusammenführen</Text>
+        <View style={[styles.cardRow, currentStyles.card]}>
+          <Text style={[styles.rowText, currentStyles.text]}>Mehrere PDFs zusammenführen</Text>
           <Switch
             value={isMergingMode}
             onValueChange={(val) => {
@@ -256,14 +309,29 @@ export default function App() {
           </TouchableOpacity>
         )}
 
-        <Text style={styles.listHeading}>Dokumente ({pdfs.length}):</Text>
+        {/* Liste Header & Alle löschen */}
+        <View style={styles.listHeaderRow}>
+          <Text style={[styles.listHeading, currentStyles.subText]}>
+            Dokumente ({pdfs.length}):
+          </Text>
+          {pdfs.length > 0 && (
+            <TouchableOpacity onPress={deleteAllPdfs} style={styles.deleteAllBtn}>
+              <Text style={styles.deleteAllBtnText}>🗑️ Alle löschen</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
+        {/* PDF Liste */}
         {pdfs.map((item) => {
           const isSelected = selectedForMerge.includes(item.id);
           return (
             <TouchableOpacity
               key={item.id}
-              style={[styles.pdfCard, isSelected && styles.pdfCardSelected]}
+              style={[
+                styles.pdfCard,
+                currentStyles.card,
+                isSelected && styles.pdfCardSelected
+              ]}
               onPress={() => {
                 if (isMergingMode) {
                   toggleSelectForMerge(item.id);
@@ -273,8 +341,10 @@ export default function App() {
               }}
             >
               <View style={styles.pdfInfo}>
-                <Text style={styles.pdfTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.dateText}>{item.date}</Text>
+                <Text style={[styles.pdfTitle, currentStyles.text]} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.dateText, currentStyles.subText]}>{item.date}</Text>
               </View>
 
               {!isMergingMode && (
@@ -299,15 +369,26 @@ export default function App() {
         })}
 
         {pdfs.length === 0 && (
-          <Text style={styles.emptyText}>Noch keine PDFs vorhanden.</Text>
+          <Text style={[styles.emptyText, currentStyles.subText]}>
+            Noch keine PDFs vorhanden.
+          </Text>
         )}
+
+        {/* Entwicklerinfo */}
+        <View style={[styles.developerCard, currentStyles.card]}>
+          <Text style={[styles.devTitle, currentStyles.text]}>👨‍💻 Entwicklerinfo</Text>
+          <Text style={[styles.devText, currentStyles.subText]}>Entwickler: Özgür Cetin</Text>
+          <Text style={[styles.devText, currentStyles.subText]}>E-Mail: ozgur.cetin@web.de</Text>
+        </View>
       </ScrollView>
 
       {/* VORSCHAU & BEARBEITUNGS-MODAL */}
       <Modal visible={previewItem !== null} animationType="slide" transparent={false}>
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle} numberOfLines={1}>{previewItem?.title}</Text>
+        <SafeAreaView style={[styles.modalContainer, currentStyles.container]}>
+          <View style={[styles.modalHeader, currentStyles.modalHeader]}>
+            <Text style={[styles.modalTitle, currentStyles.text]} numberOfLines={1}>
+              {previewItem?.title}
+            </Text>
             <TouchableOpacity style={styles.closeTopButton} onPress={() => setPreviewItem(null)}>
               <Text style={styles.closeTopButtonText}>✕ Schließen</Text>
             </TouchableOpacity>
@@ -323,7 +404,7 @@ export default function App() {
             )}
           </View>
 
-          <View style={styles.modalFooter}>
+          <View style={[styles.modalFooter, currentStyles.modalFooter]}>
             <TouchableOpacity style={styles.rotateModalButton} onPress={rotateInPreview}>
               <Text style={styles.rotateModalButtonText}>🔄 Um 90° drehen ({currentRotation}°)</Text>
             </TouchableOpacity>
@@ -345,10 +426,27 @@ export default function App() {
   );
 }
 
+const lightStyles = StyleSheet.create({
+  container: { backgroundColor: '#f5f7fa' },
+  card: { backgroundColor: '#ffffff', borderColor: '#e5e7eb' },
+  text: { color: '#1f2937' },
+  subText: { color: '#6b7280' },
+  modalHeader: { borderBottomColor: '#e5e7eb' },
+  modalFooter: { backgroundColor: '#f9fafb', borderTopColor: '#e5e7eb' },
+});
+
+const darkStyles = StyleSheet.create({
+  container: { backgroundColor: '#111827' },
+  card: { backgroundColor: '#1f2937', borderColor: '#374151' },
+  text: { color: '#f9fafb' },
+  subText: { color: '#9ca3af' },
+  modalHeader: { borderBottomColor: '#374151' },
+  modalFooter: { backgroundColor: '#1f2937', borderTopColor: '#374151' },
+});
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f7fa',
   },
   header: {
     backgroundColor: '#2563eb',
@@ -363,6 +461,19 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
+  cardRow: {
+    padding: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  rowText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   pickerButton: {
     backgroundColor: '#2563eb',
     borderRadius: 8,
@@ -375,20 +486,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
-  mergeControlRow: {
-    backgroundColor: '#ffffff',
-    padding: 12,
-    borderRadius: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  mergeControlText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
   actionBtn: {
     borderRadius: 8,
     paddingVertical: 12,
@@ -399,21 +496,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  listHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   listHeading: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#4b5563',
-    marginBottom: 8,
+  },
+  deleteAllBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  deleteAllBtnText: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '600',
   },
   pdfCard: {
-    backgroundColor: '#ffffff',
     borderRadius: 8,
     padding: 12,
     marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'transparent',
   },
   pdfCardSelected: {
     borderColor: '#2563eb',
@@ -426,11 +534,9 @@ const styles = StyleSheet.create({
   pdfTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1f2937',
   },
   dateText: {
     fontSize: 11,
-    color: '#9ca3af',
     marginTop: 2,
   },
   actionButtons: {
@@ -454,13 +560,26 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: '#9ca3af',
     marginTop: 20,
     fontStyle: 'italic',
   },
+  developerCard: {
+    marginTop: 24,
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  devTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  devText: {
+    fontSize: 12,
+  },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#ffffff',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -468,12 +587,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   modalTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1f2937',
     flex: 1,
     marginRight: 10,
   },
@@ -487,7 +604,7 @@ const styles = StyleSheet.create({
   },
   pdfViewerContainer: {
     flex: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#374151',
   },
   pdfViewer: {
     flex: 1,
@@ -497,8 +614,6 @@ const styles = StyleSheet.create({
   modalFooter: {
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#f9fafb',
   },
   rotateModalButton: {
     backgroundColor: '#4b5563',
