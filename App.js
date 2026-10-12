@@ -3,15 +3,13 @@ import {
   StyleSheet,
   Text,
   View,
-  TextInput,
   TouchableOpacity,
-  FlatList,
-  KeyboardAvoidingView,
+  ScrollView,
   Platform,
   Alert,
   SafeAreaView,
-  ScrollView,
-  Modal
+  Modal,
+  Switch
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
@@ -24,12 +22,12 @@ const STORAGE_KEY = '@pdf_manager_files';
 
 export default function App() {
   const [pdfs, setPdfs] = useState([]);
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Allgemein');
-  const [selectedFile, setSelectedFile] = useState(null);
-
   const [previewItem, setPreviewItem] = useState(null);
   const [currentRotation, setCurrentRotation] = useState(0);
+
+  // Modus für das Zusammenführen (Multi-Select)
+  const [isMergingMode, setIsMergingMode] = useState(false);
+  const [selectedForMerge, setSelectedForMerge] = useState([]);
 
   useEffect(() => {
     loadPdfs();
@@ -59,41 +57,25 @@ export default function App() {
       const result = await DocumentPicker.getDocumentAsync({
         type: 'application/pdf',
         copyToCacheDirectory: true,
+        multiple: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const file = result.assets[0];
-        setSelectedFile(file);
-        if (!title.trim()) {
-          setTitle(file.name.replace(/\.[^/.]+$/, ''));
-        }
+        const newFiles = result.assets.map((file) => ({
+          id: Date.now().toString() + Math.random(),
+          title: file.name.replace(/\.[^/.]+$/, ''),
+          uri: file.uri,
+          fileName: file.name,
+          date: new Date().toLocaleDateString('de-DE')
+        }));
+
+        const updatedPdfs = [...newFiles, ...pdfs];
+        setPdfs(updatedPdfs);
+        savePdfs(updatedPdfs);
       }
     } catch (error) {
-      Alert.alert('Fehler', 'Datei konnte nicht ausgewählt werden.');
+      Alert.alert('Fehler', 'Dateien konnten nicht ausgewählt werden.');
     }
-  };
-
-  const addPdf = () => {
-    if (!title.trim() || !selectedFile) {
-      Alert.alert('Hinweis', 'Bitte einen Titel eingeben und eine PDF-Datei auswählen.');
-      return;
-    }
-
-    const newPdf = {
-      id: Date.now().toString(),
-      title: title.trim(),
-      uri: selectedFile.uri,
-      fileName: selectedFile.name,
-      category: category.trim() || 'Allgemein',
-      date: new Date().toLocaleDateString('de-DE')
-    };
-
-    const updatedPdfs = [newPdf, ...pdfs];
-    setPdfs(updatedPdfs);
-    savePdfs(updatedPdfs);
-
-    setTitle('');
-    setSelectedFile(null);
   };
 
   const savePdfToDeviceFolder = async (item) => {
@@ -128,7 +110,7 @@ export default function App() {
     setCurrentRotation(0);
   };
 
-  // PDF drehen und live in der nativen Ansicht aktualisieren
+  // Drehen nur in der Vorschau (ohne direkte permanente Speicherung in der Liste)
   const rotateInPreview = async () => {
     if (!previewItem) return;
     try {
@@ -153,33 +135,49 @@ export default function App() {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      const updatedItem = { ...previewItem, uri: newUri };
-      setPreviewItem(updatedItem);
-
-      const updatedPdfs = pdfs.map((p) => (p.id === previewItem.id ? updatedItem : p));
-      setPdfs(updatedPdfs);
-      savePdfs(updatedPdfs);
+      // Nur Vorschau-URI anpassen
+      setPreviewItem({ ...previewItem, uri: newUri });
     } catch (error) {
       Alert.alert('Fehler', 'Drehen fehlgeschlagen.');
     }
   };
 
-  const mergePdfs = async () => {
-    if (pdfs.length < 2) {
-      Alert.alert('Hinweis', 'Du brauchst mindestens 2 PDFs in der Liste, um sie zusammenzuführen.');
+  // Permanent speichern nach dem Bearbeiten/Drehen
+  const saveRotatedChanges = () => {
+    if (!previewItem) return;
+    const updatedPdfs = pdfs.map((p) => (p.id === previewItem.id ? previewItem : p));
+    setPdfs(updatedPdfs);
+    savePdfs(updatedPdfs);
+    Alert.alert('Gespeichert', 'Die Änderungen wurden übernommen.');
+  };
+
+  const toggleSelectForMerge = (id) => {
+    if (selectedForMerge.includes(id)) {
+      setSelectedForMerge(selectedForMerge.filter((item) => item !== id));
+    } else {
+      setSelectedForMerge([...selectedForMerge, id]);
+    }
+  };
+
+  const executeMerge = async () => {
+    if (selectedForMerge.length < 2) {
+      Alert.alert('Hinweis', 'Bitte wähle mindestens 2 PDFs aus.');
       return;
     }
 
     try {
       const mergedPdf = await PDFDocument.create();
 
-      for (let i = 0; i < 2; i++) {
-        const fileBytes = await FileSystem.readAsStringAsync(pdfs[i].uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const donorPdf = await PDFDocument.load(fileBytes);
-        const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
-        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      for (const id of selectedForMerge) {
+        const item = pdfs.find((p) => p.id === id);
+        if (item) {
+          const fileBytes = await FileSystem.readAsStringAsync(item.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          const donorPdf = await PDFDocument.load(fileBytes);
+          const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
+          copiedPages.forEach((page) => mergedPdf.addPage(page));
+        }
       }
 
       const mergedPdfBytes = await mergedPdf.saveAsBase64();
@@ -191,10 +189,9 @@ export default function App() {
 
       const newMergedItem = {
         id: Date.now().toString(),
-        title: `Zusammengeführt (${pdfs[0].title} + ${pdfs[1].title})`,
+        title: `Zusammengeführt_${selectedForMerge.length}_Dateien`,
         uri: newUri,
-        fileName: 'merged_document.pdf',
-        category: 'Zusammengeführt',
+        fileName: 'zusammengefuegt.pdf',
         date: new Date().toLocaleDateString('de-DE')
       };
 
@@ -202,6 +199,8 @@ export default function App() {
       setPdfs(updatedPdfs);
       savePdfs(updatedPdfs);
 
+      setIsMergingMode(false);
+      setSelectedForMerge([]);
       Alert.alert('Erfolg', 'PDFs wurden erfolgreich zusammengefügt!');
     } catch (error) {
       Alert.alert('Fehler', 'Zusammenführen fehlgeschlagen.');
@@ -228,88 +227,83 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
-        <Text style={styles.headerSubtitle}>Mit echtem nativen PDF-Viewer</Text>
       </View>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.content}
-      >
-        <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
-          <View style={styles.formCard}>
-            <Text style={styles.formTitle}>Neues PDF hinzufügen</Text>
+      <ScrollView contentContainerStyle={styles.content}>
+        <TouchableOpacity style={styles.pickerButton} onPress={pickDocument}>
+          <Text style={styles.pickerButtonText}>📂 PDFs auswählen & hinzufügen</Text>
+        </TouchableOpacity>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Dokumenttitel"
-              placeholderTextColor="#888"
-              value={title}
-              onChangeText={setTitle}
-            />
+        <View style={styles.mergeControlRow}>
+          <Text style={styles.mergeControlText}>Mehrere PDFs zusammenführen</Text>
+          <Switch
+            value={isMergingMode}
+            onValueChange={(val) => {
+              setIsMergingMode(val);
+              setSelectedForMerge([]);
+            }}
+          />
+        </View>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Kategorie"
-              placeholderTextColor="#888"
-              value={category}
-              onChangeText={setCategory}
-            />
+        {isMergingMode && (
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: '#10b981', marginBottom: 12 }]}
+            onPress={executeMerge}
+          >
+            <Text style={styles.actionBtnText}>
+              🔗 Ausgewählte ({selectedForMerge.length}) zusammenführen
+            </Text>
+          </TouchableOpacity>
+        )}
 
-            <TouchableOpacity style={styles.filePickerButton} onPress={pickDocument}>
-              <Text style={styles.filePickerButtonText}>
-                {selectedFile ? `📁 ${selectedFile.name}` : '📂 PDF-Datei wählen'}
-              </Text>
-            </TouchableOpacity>
+        <Text style={styles.listHeading}>Dokumente ({pdfs.length}):</Text>
 
-            <TouchableOpacity style={styles.addButton} onPress={addPdf}>
-              <Text style={styles.addButtonText}>PDF Speichern</Text>
-            </TouchableOpacity>
-          </View>
-
-          {pdfs.length >= 2 && (
-            <TouchableOpacity style={styles.mergeButton} onPress={mergePdfs}>
-              <Text style={styles.mergeButtonText}>🔗 Die ersten 2 PDFs zusammenführen</Text>
-            </TouchableOpacity>
-          )}
-
-          <Text style={styles.listHeading}>Gespeicherte Dokumente ({pdfs.length}) - Tippe zum Ansehen:</Text>
-
-          {pdfs.map((item) => (
-            <TouchableOpacity key={item.id} style={styles.pdfCard} onPress={() => openPreview(item)}>
+        {pdfs.map((item) => {
+          const isSelected = selectedForMerge.includes(item.id);
+          return (
+            <TouchableOpacity
+              key={item.id}
+              style={[styles.pdfCard, isSelected && styles.pdfCardSelected]}
+              onPress={() => {
+                if (isMergingMode) {
+                  toggleSelectForMerge(item.id);
+                } else {
+                  openPreview(item);
+                }
+              }}
+            >
               <View style={styles.pdfInfo}>
-                <Text style={styles.pdfTitle}>{item.title}</Text>
-                <Text style={styles.pdfUrl} numberOfLines={1}>{item.fileName}</Text>
-                <View style={styles.badgeRow}>
-                  <Text style={styles.badge}>{item.category}</Text>
-                  <Text style={styles.dateText}>{item.date}</Text>
+                <Text style={styles.pdfTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.dateText}>{item.date}</Text>
+              </View>
+
+              {!isMergingMode && (
+                <View style={styles.actionButtons} onStartShouldSetResponder={() => true}>
+                  <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => savePdfToDeviceFolder(item)}
+                  >
+                    <Text style={styles.iconText}>💾</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => deletePdf(item.id)}
+                  >
+                    <Text style={styles.deleteButtonText}>✕</Text>
+                  </TouchableOpacity>
                 </View>
-              </View>
-
-              <View style={styles.actionButtons} onStartShouldSetResponder={() => true}>
-                <TouchableOpacity
-                  style={styles.iconButton}
-                  onPress={() => savePdfToDeviceFolder(item)}
-                >
-                  <Text style={styles.iconText}>💾</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => deletePdf(item.id)}
-                >
-                  <Text style={styles.deleteButtonText}>✕</Text>
-                </TouchableOpacity>
-              </View>
+              )}
             </TouchableOpacity>
-          ))}
+          );
+        })}
 
-          {pdfs.length === 0 && (
-            <Text style={styles.emptyText}>Noch keine PDFs gespeichert.</Text>
-          )}
-        </ScrollView>
-      </KeyboardAvoidingView>
+        {pdfs.length === 0 && (
+          <Text style={styles.emptyText}>Noch keine PDFs vorhanden.</Text>
+        )}
+      </ScrollView>
 
-      {/* NATIVES PDF-VIEWER MODAL */}
+      {/* VORSCHAU & BEARBEITUNGS-MODAL */}
       <Modal visible={previewItem !== null} animationType="slide" transparent={false}>
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
@@ -334,6 +328,10 @@ export default function App() {
               <Text style={styles.rotateModalButtonText}>🔄 Um 90° drehen ({currentRotation}°)</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity style={styles.applyModalButton} onPress={saveRotatedChanges}>
+              <Text style={styles.applyModalButtonText}>✔️ Änderungen übernehmen</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.saveModalButton}
               onPress={() => savePdfToDeviceFolder(previewItem)}
@@ -354,86 +352,49 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#2563eb',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
+    paddingVertical: 18,
     alignItems: 'center',
   },
   headerTitle: {
     color: '#ffffff',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
   },
-  headerSubtitle: {
-    color: '#dbeafe',
-    fontSize: 13,
-    marginTop: 4,
-  },
   content: {
-    flex: 1,
     padding: 16,
   },
-  formCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  formTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: '#f9fafb',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#1f2937',
-    marginBottom: 10,
-  },
-  filePickerButton: {
-    backgroundColor: '#eff6ff',
-    borderWidth: 1,
-    borderColor: '#bfdbfe',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  filePickerButtonText: {
-    color: '#1d4ed8',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  addButton: {
+  pickerButton: {
     backgroundColor: '#2563eb',
     borderRadius: 8,
-    paddingVertical: 12,
+    paddingVertical: 14,
     alignItems: 'center',
+    marginBottom: 12,
   },
-  addButtonText: {
+  pickerButtonText: {
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '600',
   },
-  mergeButton: {
-    backgroundColor: '#10b981',
+  mergeControlRow: {
+    backgroundColor: '#ffffff',
+    padding: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  mergeControlText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  actionBtn: {
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
-    marginBottom: 16,
   },
-  mergeButtonText: {
+  actionBtnText: {
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
@@ -446,16 +407,17 @@ const styles = StyleSheet.create({
   },
   pdfCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 10,
+    borderRadius: 8,
     padding: 12,
-    marginBottom: 10,
+    marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 2,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  pdfCardSelected: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
   },
   pdfInfo: {
     flex: 1,
@@ -465,31 +427,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#1f2937',
-    marginBottom: 2,
-  },
-  pdfUrl: {
-    fontSize: 11,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  badge: {
-    backgroundColor: '#eff6ff',
-    color: '#1d4ed8',
-    fontSize: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
-    fontWeight: '500',
-    marginRight: 6,
   },
   dateText: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#9ca3af',
+    marginTop: 2,
   },
   actionButtons: {
     flexDirection: 'row',
@@ -559,26 +501,38 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9fafb',
   },
   rotateModalButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#4b5563',
     borderRadius: 8,
-    paddingVertical: 12,
+    paddingVertical: 10,
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   rotateModalButtonText: {
     color: '#ffffff',
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  applyModalButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  applyModalButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
     fontWeight: '600',
   },
   saveModalButton: {
     backgroundColor: '#10b981',
     borderRadius: 8,
-    paddingVertical: 12,
+    paddingVertical: 10,
     alignItems: 'center',
   },
   saveModalButtonText: {
     color: '#ffffff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
   },
 });
