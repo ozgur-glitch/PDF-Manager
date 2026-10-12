@@ -15,6 +15,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { PDFDocument, degrees } from 'pdf-lib';
 
@@ -91,7 +92,24 @@ export default function App() {
     setSelectedFile(null);
   };
 
-  // Funktion zum Drehen einer PDF (90 Grad im Uhrzeigersinn)
+  // Funktion zum Speichern / Exportieren der PDF auf dem Smartphone
+  const savePdfToDevice = async (item) => {
+    try {
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert('Hinweis', 'Teilen/Speichern wird auf diesem Gerät nicht unterstützt.');
+        return;
+      }
+      await Sharing.shareAsync(item.uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: `PDF speichern: ${item.title}`,
+        UTI: 'com.adobe.pdf',
+      });
+    } catch (error) {
+      Alert.alert('Fehler', 'Datei konnte nicht gespeichert werden.');
+    }
+  };
+
   const rotatePdf = async (item) => {
     try {
       const fileBytes = await FileSystem.readAsStringAsync(item.uri, {
@@ -122,13 +140,12 @@ export default function App() {
 
       setPdfs(updatedPdfs);
       savePdfs(updatedPdfs);
-      Alert.alert('Erfolg', 'PDF wurde erfolgreich gedreht!');
+      Alert.alert('Erfolg', 'PDF wurde erfolgreich gedreht! Du kannst es jetzt speichern.');
     } catch (error) {
       Alert.alert('Fehler', 'PDF konnte nicht gedreht werden.');
     }
   };
 
-  // Funktion zum Zusammenführen von zwei PDFs
   const mergePdfs = async () => {
     if (pdfs.length < 2) {
       Alert.alert('Hinweis', 'Du brauchst mindestens 2 PDFs in der Liste, um sie zusammenzuführen.');
@@ -138,7 +155,6 @@ export default function App() {
     try {
       const mergedPdf = await PDFDocument.create();
 
-      // Wir nehmen hier die ersten beiden PDFs aus der Liste als Beispiel zum Zusammenführen
       for (let i = 0; i < 2; i++) {
         const fileBytes = await FileSystem.readAsStringAsync(pdfs[i].uri, {
           encoding: FileSystem.EncodingType.Base64,
@@ -168,14 +184,14 @@ export default function App() {
       setPdfs(updatedPdfs);
       savePdfs(updatedPdfs);
 
-      Alert.alert('Erfolg', 'Die ersten beiden PDFs wurden erfolgreich zusammengefügt!');
+      Alert.alert('Erfolg', 'PDFs wurden erfolgreich zusammengefügt! Du kannst die neue Datei speichern.');
     } catch (error) {
       Alert.alert('Fehler', 'Zusammenführen fehlgeschlagen.');
     }
   };
 
   const deletePdf = (id) => {
-    Alert.alert('Löschen', 'Möchtest du dieses Dokument wirklich entfernen?', [
+    Alert.alert('Löschen', 'Möchtest du dieses Dokument wirklich aus der Liste entfernen?', [
       { text: 'Abbrechen', style: 'cancel' },
       {
         text: 'Löschen',
@@ -194,7 +210,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
-        <Text style={styles.headerSubtitle}>Drehen, Zusammenführen & Verwalten</Text>
+        <Text style={styles.headerSubtitle}>Drehen, Zusammenführen, Speichern & Löschen</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -252,13 +268,23 @@ export default function App() {
               </View>
 
               <View style={styles.actionButtons}>
+                {/* PDF drehen */}
                 <TouchableOpacity
-                  style={styles.rotateButton}
+                  style={styles.iconButton}
                   onPress={() => rotatePdf(item)}
                 >
-                  <Text style={styles.rotateButtonText}>🔄</Text>
+                  <Text style={styles.iconText}>🔄</Text>
                 </TouchableOpacity>
 
+                {/* PDF auf Smartphone speichern / exportieren */}
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() => savePdfToDevice(item)}
+                >
+                  <Text style={styles.iconText}>💾</Text>
+                </TouchableOpacity>
+
+                {/* PDF löschen */}
                 <TouchableOpacity
                   style={styles.deleteButton}
                   onPress={() => deletePdf(item.id)}
@@ -378,7 +404,7 @@ const styles = StyleSheet.create({
   pdfCard: {
     backgroundColor: '#ffffff',
     borderRadius: 10,
-    padding: 14,
+    padding: 12,
     marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
@@ -390,17 +416,18 @@ const styles = StyleSheet.create({
   },
   pdfInfo: {
     flex: 1,
+    marginRight: 6,
   },
   pdfTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#1f2937',
     marginBottom: 2,
   },
   pdfUrl: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#6b7280',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   badgeRow: {
     flexDirection: 'row',
@@ -409,31 +436,31 @@ const styles = StyleSheet.create({
   badge: {
     backgroundColor: '#eff6ff',
     color: '#1d4ed8',
-    fontSize: 11,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    fontSize: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
     borderRadius: 4,
     overflow: 'hidden',
     fontWeight: '500',
-    marginRight: 8,
+    marginRight: 6,
   },
   dateText: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#9ca3af',
   },
   actionButtons: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  rotateButton: {
-    padding: 8,
-    marginRight: 4,
+  iconButton: {
+    padding: 6,
+    marginRight: 2,
   },
-  rotateButtonText: {
+  iconText: {
     fontSize: 16,
   },
   deleteButton: {
-    padding: 8,
+    padding: 6,
   },
   deleteButtonText: {
     fontSize: 16,
