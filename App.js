@@ -14,7 +14,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
-import * as ImagePicker from 'expo-image-picker';
+import DocumentScanner from 'react-native-document-scanner-plugin';
 import Pdf from 'react-native-pdf';
 import { StatusBar } from 'expo-status-bar';
 import { PDFDocument, degrees } from 'pdf-lib';
@@ -30,7 +30,7 @@ export default function App() {
   // Markierte Seiten im Vorschaumodus (Array von Seitennummern: [1, 3, 5])
   const [selectedPages, setSelectedPages] = useState([]);
 
-  // Darkmode & Sortierung
+  // Dark Mode & Sortierung
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [sortBy, setSortBy] = useState('newest');
 
@@ -109,19 +109,14 @@ export default function App() {
 
   const takePhotoAndSaveAsPdf = async () => {
     try {
-      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permissionResult.granted) {
-        Alert.alert('Berechtigung verfehlt', 'Kamerazugriff wird benötigt.');
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
+      // Startet den Scanner mit automatischer Kanten-Erkennung und manuellem Feinschnitt
+      const { scannedImages } = await DocumentScanner.scanDocument({
+        maxNumDocuments: 1,
+        croppedImageQuality: 90,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const imageUri = result.assets[0].uri;
+      if (scannedImages && scannedImages.length > 0) {
+        const imageUri = scannedImages[0];
         const pdfDoc = await PDFDocument.create();
         const page = pdfDoc.addPage([595.28, 841.89]);
         
@@ -158,10 +153,10 @@ export default function App() {
         const updatedPdfs = [newScanItem, ...pdfs];
         setPdfs(updatedPdfs);
         savePdfs(updatedPdfs);
-        Alert.alert('Erfolg', 'Foto wurde erfolgreich als PDF gespeichert!');
+        Alert.alert('Erfolg', 'Dokument wurde automatisch erkannt und als PDF gespeichert!');
       }
     } catch (error) {
-      Alert.alert('Fehler', 'Kamera-Scan fehlgeschlagen.');
+      // Benutzer hat den Scan ggf. abgebrochen
     }
   };
 
@@ -221,7 +216,6 @@ export default function App() {
     }
   };
 
-  // Drehen (Links / Rechts) - für markierte Seiten oder alle Seiten
   const rotateSelectedPages = async (direction) => {
     if (!previewItem) return;
     const pagesToRotate = selectedPages.length > 0 
@@ -254,7 +248,6 @@ export default function App() {
     }
   };
 
-  // Markierte Seiten löschen
   const deleteSelectedPages = async () => {
     if (!previewItem) return;
     if (selectedPages.length === 0) {
@@ -270,7 +263,6 @@ export default function App() {
       const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, { encoding: FileSystem.EncodingType.Base64 });
       const pdfDoc = await PDFDocument.load(fileBytes);
 
-      // Rückwärts löschen, damit sich die Indizes beim Löschen nicht verschieben
       const sortedDesc = [...selectedPages].sort((a, b) => b - a);
       sortedDesc.forEach((pageNum) => {
         pdfDoc.removePage(pageNum - 1);
@@ -290,7 +282,6 @@ export default function App() {
     }
   };
 
-  // Markierte Seiten verschieben (Richtung -1 = nach oben/links, +1 = nach unten/rechts)
   const moveSelectedPages = async (direction) => {
     if (!previewItem) return;
     if (selectedPages.length === 0) {
@@ -318,7 +309,6 @@ export default function App() {
         return;
       }
 
-      // Verschiebe-Index-Array anpassen
       if (direction === -1) {
         for (let pageNum of targetSelected) {
           const idx = pageNum - 1;
@@ -463,7 +453,7 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.content}>
         {/* Dark Mode Switch */}
         <View style={[styles.cardRow, currentStyles.card]}>
-          <Text style={[styles.rowText, currentStyles.text]}>🌙 Dunkler Modus</Text>
+          <Text style={[styles.rowText, currentStyles.text]}>🌙 Dark Mode</Text>
           <Switch value={isDarkMode} onValueChange={toggleTheme} />
         </View>
 
