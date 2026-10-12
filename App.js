@@ -9,11 +9,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  SafeAreaView
+  SafeAreaView,
+  ScrollView
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { StatusBar } from 'expo-status-bar';
+import { PDFDocument, degrees } from 'pdf-lib';
 
 const STORAGE_KEY = '@pdf_manager_files';
 
@@ -46,7 +49,6 @@ export default function App() {
     }
   };
 
-  // Funktion zum Auswählen einer PDF-Datei direkt vom Smartphone-Speicher
   const pickDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -57,7 +59,6 @@ export default function App() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
         setSelectedFile(file);
-        // Automatisch den Dateinamen als Titel vorschlagen, falls das Titel-Feld leer ist
         if (!title.trim()) {
           setTitle(file.name.replace(/\.[^/.]+$/, ''));
         }
@@ -86,9 +87,91 @@ export default function App() {
     setPdfs(updatedPdfs);
     savePdfs(updatedPdfs);
 
-    // Eingabefelder zurücksetzen
     setTitle('');
     setSelectedFile(null);
+  };
+
+  // Funktion zum Drehen einer PDF (90 Grad im Uhrzeigersinn)
+  const rotatePdf = async (item) => {
+    try {
+      const fileBytes = await FileSystem.readAsStringAsync(item.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const pdfDoc = await PDFDocument.load(fileBytes);
+      const pages = pdfDoc.getPages();
+      
+      pages.forEach((page) => {
+        const currentRotation = page.getRotation().angle;
+        page.setRotation(degrees(currentRotation + 90));
+      });
+
+      const modifiedPdfBytes = await pdfDoc.saveAsBase64();
+      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_rotated.pdf`;
+      
+      await FileSystem.writeAsStringAsync(newUri, modifiedPdfBytes, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const updatedPdfs = pdfs.map((p) => {
+        if (p.id === item.id) {
+          return { ...p, uri: newUri };
+        }
+        return p;
+      });
+
+      setPdfs(updatedPdfs);
+      savePdfs(updatedPdfs);
+      Alert.alert('Erfolg', 'PDF wurde erfolgreich gedreht!');
+    } catch (error) {
+      Alert.alert('Fehler', 'PDF konnte nicht gedreht werden.');
+    }
+  };
+
+  // Funktion zum Zusammenführen von zwei PDFs
+  const mergePdfs = async () => {
+    if (pdfs.length < 2) {
+      Alert.alert('Hinweis', 'Du brauchst mindestens 2 PDFs in der Liste, um sie zusammenzuführen.');
+      return;
+    }
+
+    try {
+      const mergedPdf = await PDFDocument.create();
+
+      // Wir nehmen hier die ersten beiden PDFs aus der Liste als Beispiel zum Zusammenführen
+      for (let i = 0; i < 2; i++) {
+        const fileBytes = await FileSystem.readAsStringAsync(pdfs[i].uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const donorPdf = await PDFDocument.load(fileBytes);
+        const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      }
+
+      const mergedPdfBytes = await mergedPdf.saveAsBase64();
+      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_merged.pdf`;
+
+      await FileSystem.writeAsStringAsync(newUri, mergedPdfBytes, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const newMergedItem = {
+        id: Date.now().toString(),
+        title: `Zusammengeführt (${pdfs[0].title} + ${pdfs[1].title})`,
+        uri: newUri,
+        fileName: 'merged_document.pdf',
+        category: 'Zusammengeführt',
+        date: new Date().toLocaleDateString('de-DE')
+      };
+
+      const updatedPdfs = [newMergedItem, ...pdfs];
+      setPdfs(updatedPdfs);
+      savePdfs(updatedPdfs);
+
+      Alert.alert('Erfolg', 'Die ersten beiden PDFs wurden erfolgreich zusammengefügt!');
+    } catch (error) {
+      Alert.alert('Fehler', 'Zusammenführen fehlgeschlagen.');
+    }
   };
 
   const deletePdf = (id) => {
@@ -111,51 +194,54 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
-        <Text style={styles.headerSubtitle}>PDFs direkt vom Smartphone verwalten</Text>
+        <Text style={styles.headerSubtitle}>Drehen, Zusammenführen & Verwalten</Text>
       </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.content}
       >
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>Neues PDF hinzufügen</Text>
+        <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>Neues PDF hinzufügen</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Dokumenttitel (z.B. Rechnung)"
-            placeholderTextColor="#888"
-            value={title}
-            onChangeText={setTitle}
-          />
+            <TextInput
+              style={styles.input}
+              placeholder="Dokumenttitel"
+              placeholderTextColor="#888"
+              value={title}
+              onChangeText={setTitle}
+            />
 
-          <TextInput
-            style={styles.input}
-            placeholder="Kategorie (z.B. Arbeit, Privat)"
-            placeholderTextColor="#888"
-            value={category}
-            onChangeText={setCategory}
-          />
+            <TextInput
+              style={styles.input}
+              placeholder="Kategorie"
+              placeholderTextColor="#888"
+              value={category}
+              onChangeText={setCategory}
+            />
 
-          <TouchableOpacity style={styles.filePickerButton} onPress={pickDocument}>
-            <Text style={styles.filePickerButtonText}>
-              {selectedFile ? `📁 ${selectedFile.name}` : '📂 PDF-Datei vom Smartphone wählen'}
-            </Text>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.filePickerButton} onPress={pickDocument}>
+              <Text style={styles.filePickerButtonText}>
+                {selectedFile ? `📁 ${selectedFile.name}` : '📂 PDF-Datei wählen'}
+              </Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.addButton} onPress={addPdf}>
-            <Text style={styles.addButtonText}>PDF Speichern</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.addButton} onPress={addPdf}>
+              <Text style={styles.addButtonText}>PDF Speichern</Text>
+            </TouchableOpacity>
+          </View>
 
-        <Text style={styles.listHeading}>Gespeicherte Dokumente ({pdfs.length})</Text>
+          {pdfs.length >= 2 && (
+            <TouchableOpacity style={styles.mergeButton} onPress={mergePdfs}>
+              <Text style={styles.mergeButtonText}>🔗 Die ersten 2 PDFs zusammenführen</Text>
+            </TouchableOpacity>
+          )}
 
-        <FlatList
-          data={pdfs}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
-          renderItem={({ item }) => (
-            <View style={styles.pdfCard}>
+          <Text style={styles.listHeading}>Gespeicherte Dokumente ({pdfs.length})</Text>
+
+          {pdfs.map((item) => (
+            <View key={item.id} style={styles.pdfCard}>
               <View style={styles.pdfInfo}>
                 <Text style={styles.pdfTitle}>{item.title}</Text>
                 <Text style={styles.pdfUrl} numberOfLines={1}>{item.fileName}</Text>
@@ -164,18 +250,29 @@ export default function App() {
                   <Text style={styles.dateText}>{item.date}</Text>
                 </View>
               </View>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={() => deletePdf(item.id)}
-              >
-                <Text style={styles.deleteButtonText}>✕</Text>
-              </TouchableOpacity>
+
+              <View style={styles.actionButtons}>
+                <TouchableOpacity
+                  style={styles.rotateButton}
+                  onPress={() => rotatePdf(item)}
+                >
+                  <Text style={styles.rotateButtonText}>🔄</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => deletePdf(item.id)}
+                >
+                  <Text style={styles.deleteButtonText}>✕</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          )}
-          ListEmptyComponent={
+          ))}
+
+          {pdfs.length === 0 && (
             <Text style={styles.emptyText}>Noch keine PDFs gespeichert.</Text>
-          }
-        />
+          )}
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -210,7 +307,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -254,11 +351,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
-    marginTop: 4,
   },
   addButtonText: {
     color: '#ffffff',
     fontSize: 15,
+    fontWeight: '600',
+  },
+  mergeButton: {
+    backgroundColor: '#10b981',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  mergeButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
     fontWeight: '600',
   },
   listHeading: {
@@ -266,9 +374,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#4b5563',
     marginBottom: 8,
-  },
-  listContainer: {
-    paddingBottom: 20,
   },
   pdfCard: {
     backgroundColor: '#ffffff',
@@ -316,10 +421,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#9ca3af',
   },
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rotateButton: {
+    padding: 8,
+    marginRight: 4,
+  },
+  rotateButtonText: {
+    fontSize: 16,
+  },
   deleteButton: {
     padding: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   deleteButtonText: {
     fontSize: 16,
