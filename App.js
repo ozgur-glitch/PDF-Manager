@@ -92,7 +92,6 @@ export default function App() {
     setSelectedFile(null);
   };
 
-  // Funktion zum Speichern / Exportieren der PDF auf dem Smartphone
   const savePdfToDevice = async (item) => {
     try {
       const isAvailable = await Sharing.isAvailableAsync();
@@ -110,6 +109,7 @@ export default function App() {
     }
   };
 
+  // Funktion zum vollständigen Drehen (90° Schritte im Uhrzeigersinn bis 360°)
   const rotatePdf = async (item) => {
     try {
       const fileBytes = await FileSystem.readAsStringAsync(item.uri, {
@@ -121,7 +121,9 @@ export default function App() {
       
       pages.forEach((page) => {
         const currentRotation = page.getRotation().angle;
-        page.setRotation(degrees(currentRotation + 90));
+        // Dreht um 90 Grad weiter; nach 270 Grad springt es zurück auf 0 Grad (360 -> 0)
+        const nextRotation = (currentRotation + 90) % 360;
+        page.setRotation(degrees(nextRotation));
       });
 
       const modifiedPdfBytes = await pdfDoc.saveAsBase64();
@@ -140,7 +142,7 @@ export default function App() {
 
       setPdfs(updatedPdfs);
       savePdfs(updatedPdfs);
-      Alert.alert('Erfolg', 'PDF wurde erfolgreich gedreht! Du kannst es jetzt speichern.');
+      Alert.alert('Erfolg', 'PDF wurde um weitere 90° gedreht!');
     } catch (error) {
       Alert.alert('Fehler', 'PDF konnte nicht gedreht werden.');
     }
@@ -184,7 +186,7 @@ export default function App() {
       setPdfs(updatedPdfs);
       savePdfs(updatedPdfs);
 
-      Alert.alert('Erfolg', 'PDFs wurden erfolgreich zusammengefügt! Du kannst die neue Datei speichern.');
+      Alert.alert('Erfolg', 'PDFs wurden erfolgreich zusammengefügt!');
     } catch (error) {
       Alert.alert('Fehler', 'Zusammenführen fehlgeschlagen.');
     }
@@ -210,7 +212,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
-        <Text style={styles.headerSubtitle}>Drehen, Zusammenführen, Speichern & Löschen</Text>
+        <Text style={styles.headerSubtitle}>Drehen (rundherum), Speichern & Löschen</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -268,7 +270,7 @@ export default function App() {
               </View>
 
               <View style={styles.actionButtons}>
-                {/* PDF drehen */}
+                {/* PDF schrittweise um 360 Grad drehen */}
                 <TouchableOpacity
                   style={styles.iconButton}
                   onPress={() => rotatePdf(item)}
