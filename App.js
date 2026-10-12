@@ -10,12 +10,12 @@ import {
   Platform,
   Alert,
   SafeAreaView,
-  ScrollView
+  ScrollView,
+  Modal
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { PDFDocument, degrees } from 'pdf-lib';
 
@@ -26,6 +26,10 @@ export default function App() {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Allgemein');
   const [selectedFile, setSelectedFile] = useState(null);
+
+  // Zustand für die Live-Vorschau & das Bearbeiten
+  const [previewItem, setPreviewItem] = useState(null);
+  const [currentRotation, setCurrentRotation] = useState(0);
 
   useEffect(() => {
     loadPdfs();
@@ -92,27 +96,53 @@ export default function App() {
     setSelectedFile(null);
   };
 
-  const savePdfToDevice = async (item) => {
+  // Echter Android-Speicherdialog zum direkten Abspeichern im Handy-Ordner
+  const savePdfToDeviceFolder = async (item) => {
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Hinweis', 'Teilen/Speichern wird auf diesem Gerät nicht unterstützt.');
-        return;
+      if (Platform.OS === 'android') {
+        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        if (!permissions.granted) {
+          return;
+        }
+
+        const base64Data = await FileSystem.readAsStringAsync(item.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        const targetUri = await FileSystem.StorageAccessFramework.createFileAsync(
+          permissions.directoryUri,
+          item.fileName || 'dokument.pdf',
+          'application/pdf'
+        );
+
+        await FileSystem.writeAsStringAsync(targetUri, base64Data, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        Alert.alert('Erfolg', 'PDF wurde erfolgreich im gewählten Handy-Ordner gespeichert!');
+      } else {
+        // Fallback für iOS (Teilen-Dialog zum Sichern in "Dateien")
+        Alert.alert('Info', 'Bitte wähle "In Dateien sichern" im Menü aus.');
       }
-      await Sharing.shareAsync(item.uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: `PDF speichern: ${item.title}`,
-        UTI: 'com.adobe.pdf',
-      });
     } catch (error) {
-      Alert.alert('Fehler', 'Datei konnte nicht gespeichert werden.');
+      Alert.alert('Fehler', 'Speichern fehlgeschlagen.');
     }
   };
 
-  // Funktion zum vollständigen Drehen (90° Schritte im Uhrzeigersinn bis 360°)
-  const rotatePdf = async (item) => {
+  // Vorschau öffnen
+  const openPreview = (item) => {
+    setPreviewItem(item);
+    setCurrentRotation(0); // Startet bei 0 Grad Ansicht
+  };
+
+  // Drehen in der Live-Vorschau (0° -> 90° -> 180° -> 270° -> 0°)
+  const rotateInPreview = async () => {
+    if (!previewItem) return;
     try {
-      const fileBytes = await FileSystem.readAsStringAsync(item.uri, {
+      const nextRot = (currentRotation + 90) % 360;
+      setCurrentRotation(nextRot);
+
+      const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
@@ -120,10 +150,7 @@ export default function App() {
       const pages = pdfDoc.getPages();
       
       pages.forEach((page) => {
-        const currentRotation = page.getRotation().angle;
-        // Dreht um 90 Grad weiter; nach 270 Grad springt es zurück auf 0 Grad (360 -> 0)
-        const nextRotation = (currentRotation + 90) % 360;
-        page.setRotation(degrees(nextRotation));
+        page.setRotation(degrees(nextRot));
       });
 
       const modifiedPdfBytes = await pdfDoc.saveAsBase64();
@@ -133,18 +160,14 @@ export default function App() {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      const updatedPdfs = pdfs.map((p) => {
-        if (p.id === item.id) {
-          return { ...p, uri: newUri };
-        }
-        return p;
-      });
+      const updatedItem = { ...previewItem, uri: newUri };
+      setPreviewItem(updatedItem);
 
+      const updatedPdfs = pdfs.map((p) => (p.id === previewItem.id ? updatedItem : p));
       setPdfs(updatedPdfs);
       savePdfs(updatedPdfs);
-      Alert.alert('Erfolg', 'PDF wurde um weitere 90° gedreht!');
     } catch (error) {
-      Alert.alert('Fehler', 'PDF konnte nicht gedreht werden.');
+      Alert.alert('Fehler', 'Drehen fehlgeschlagen.');
     }
   };
 
@@ -193,7 +216,7 @@ export default function App() {
   };
 
   const deletePdf = (id) => {
-    Alert.alert('Löschen', 'Möchtest du dieses Dokument wirklich aus der Liste entfernen?', [
+    Alert.alert('Löschen', 'Möchtest du dieses Dokument wirklich entfernen?', [
       { text: 'Abbrechen', style: 'cancel' },
       {
         text: 'Löschen',
@@ -212,7 +235,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📄 PDF-Manager</Text>
-        <Text style={styles.headerSubtitle}>Drehen (rundherum), Speichern & Löschen</Text>
+        <Text style={styles.headerSubtitle}>Mit Live-Vorschau & direktem Speichern</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -256,10 +279,10 @@ export default function App() {
             </TouchableOpacity>
           )}
 
-          <Text style={styles.listHeading}>Gespeicherte Dokumente ({pdfs.length})</Text>
+          <Text style={styles.listHeading}>Gespeicherte Dokumente ({pdfs.length}) - Tippe zum Ansehen & Drehen:</Text>
 
           {pdfs.map((item) => (
-            <View key={item.id} style={styles.pdfCard}>
+            <TouchableOpacity key={item.id} style={styles.pdfCard} onPress={() => openPreview(item)}>
               <View style={styles.pdfInfo}>
                 <Text style={styles.pdfTitle}>{item.title}</Text>
                 <Text style={styles.pdfUrl} numberOfLines={1}>{item.fileName}</Text>
@@ -269,24 +292,16 @@ export default function App() {
                 </View>
               </View>
 
-              <View style={styles.actionButtons}>
-                {/* PDF schrittweise um 360 Grad drehen */}
+              <View style={styles.actionButtons} onStartShouldSetResponder={() => true}>
+                {/* Direktes Speichern auf dem Handy */}
                 <TouchableOpacity
                   style={styles.iconButton}
-                  onPress={() => rotatePdf(item)}
-                >
-                  <Text style={styles.iconText}>🔄</Text>
-                </TouchableOpacity>
-
-                {/* PDF auf Smartphone speichern / exportieren */}
-                <TouchableOpacity
-                  style={styles.iconButton}
-                  onPress={() => savePdfToDevice(item)}
+                  onPress={() => savePdfToDeviceFolder(item)}
                 >
                   <Text style={styles.iconText}>💾</Text>
                 </TouchableOpacity>
 
-                {/* PDF löschen */}
+                {/* Löschen */}
                 <TouchableOpacity
                   style={styles.deleteButton}
                   onPress={() => deletePdf(item.id)}
@@ -294,7 +309,7 @@ export default function App() {
                   <Text style={styles.deleteButtonText}>✕</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
 
           {pdfs.length === 0 && (
@@ -302,6 +317,42 @@ export default function App() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* LIVE-VORSCHAU MODAL */}
+      <Modal visible={previewItem !== null} animationType="slide" transparent={true}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>🔍 Dokumentenvorschau</Text>
+            <Text style={styles.modalSubtitle} numberOfLines={1}>{previewItem?.title}</Text>
+
+            {/* Visuelle Box zur Vorschau der aktuellen Drehung */}
+            <View style={[styles.previewBox, { transform: [{ rotate: `${currentRotation}deg` }] }]}>
+              <Text style={styles.previewIcon}>📄</Text>
+              <Text style={styles.previewRotationText}>{currentRotation}° gedreht</Text>
+            </View>
+
+            <TouchableOpacity style={styles.rotateModalButton} onPress={rotateInPreview}>
+              <Text style={styles.rotateModalButtonText}>🔄 Um 90° weiterdrehen</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.saveModalButton}
+              onPress={() => {
+                savePdfToDeviceFolder(previewItem);
+              }}
+            >
+              <Text style={styles.saveModalButtonText}>💾 Auf Handy speichern</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.closeModalButton}
+              onPress={() => setPreviewItem(null)}
+            >
+              <Text style={styles.closeModalButtonText}>Schließen</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -398,7 +449,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   listHeading: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#4b5563',
     marginBottom: 8,
@@ -456,16 +507,16 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     padding: 6,
-    marginRight: 2,
+    marginRight: 4,
   },
   iconText: {
-    fontSize: 16,
+    fontSize: 18,
   },
   deleteButton: {
     padding: 6,
   },
   deleteButtonText: {
-    fontSize: 16,
+    fontSize: 18,
     color: '#ef4444',
     fontWeight: 'bold',
   },
@@ -474,5 +525,89 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginTop: 20,
     fontStyle: 'italic',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 20,
+  },
+  previewBox: {
+    width: 160,
+    height: 220,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  previewIcon: {
+    fontSize: 48,
+    marginBottom: 8,
+  },
+  previewRotationText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2563eb',
+  },
+  rotateModalButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  rotateModalButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  saveModalButton: {
+    backgroundColor: '#10b981',
+    borderRadius: 8,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  saveModalButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  closeModalButton: {
+    paddingVertical: 10,
+  },
+  closeModalButtonText: {
+    color: '#6b7280',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
