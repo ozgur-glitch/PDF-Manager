@@ -9,8 +9,7 @@ import {
   Alert,
   SafeAreaView,
   Modal,
-  Switch,
-  TextInput
+  Switch
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
@@ -18,7 +17,7 @@ import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import Pdf from 'react-native-pdf';
 import { StatusBar } from 'expo-status-bar';
-import { PDFDocument, degrees, rgb } from 'pdf-lib';
+import { PDFDocument, degrees } from 'pdf-lib';
 
 const STORAGE_KEY = '@pdf_manager_files';
 const THEME_KEY = '@pdf_manager_theme';
@@ -26,22 +25,18 @@ const THEME_KEY = '@pdf_manager_theme';
 export default function App() {
   const [pdfs, setPdfs] = useState([]);
   const [previewItem, setPreviewItem] = useState(null);
-  const [currentRotation, setCurrentRotation] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // Markierte Seiten im Vorschaumodus (Array von Seitennummern: [1, 3, 5])
+  const [selectedPages, setSelectedPages] = useState([]);
 
   // Darkmode & Sortierung
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [sortBy, setSortBy] = useState('newest'); // 'newest', 'oldest', 'alpha'
+  const [sortBy, setSortBy] = useState('newest');
 
   // Multi-Select / Merge State
   const [isMergingMode, setIsMergingMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState([]);
-
-  // Editor State für Seitenoperationen im Vorschaumodus
-  const [activeTab, setActiveTab] = useState('view'); // 'view', 'edit', 'extract', 'stamp'
-  const [targetPage, setTargetPage] = useState('1');
-  const [extractStart, setExtractStart] = useState('1');
-  const [extractEnd, setExtractEnd] = useState('1');
-  const [stampText, setStampText] = useState('');
 
   useEffect(() => {
     loadPdfs();
@@ -81,7 +76,6 @@ export default function App() {
     } catch (error) {}
   };
 
-  // Dokumente auswählen (PDFs)
   const pickDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -113,7 +107,6 @@ export default function App() {
     }
   };
 
-  // Foto aufnehmen & als PDF speichern
   const takePhotoAndSaveAsPdf = async () => {
     try {
       const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
@@ -129,10 +122,8 @@ export default function App() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const imageUri = result.assets[0].uri;
-        
-        // Bild in PDF konvertieren mit pdf-lib
         const pdfDoc = await PDFDocument.create();
-        const page = pdfDoc.addPage([595.28, 841.89]); // A4 Format
+        const page = pdfDoc.addPage([595.28, 841.89]);
         
         const imageBytes = await FileSystem.readAsStringAsync(imageUri, {
           encoding: FileSystem.EncodingType.Base64,
@@ -201,201 +192,163 @@ export default function App() {
     }
   };
 
-  const openPreview = (item) => {
+  const openPreview = async (item) => {
+    try {
+      const fileBytes = await FileSystem.readAsStringAsync(item.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const pdfDoc = await PDFDocument.load(fileBytes);
+      setTotalPages(pdfDoc.getPageCount());
+    } catch (e) {
+      setTotalPages(1);
+    }
     setPreviewItem(item);
-    setCurrentRotation(0);
-    setActiveTab('view');
+    setSelectedPages([]);
   };
 
-  // 1. Drehen
-  const rotateInPreview = async () => {
-    if (!previewItem) return;
-    try {
-      const nextRot = (currentRotation + 90) % 360;
-      setCurrentRotation(nextRot);
+  const togglePageSelection = (pageNum) => {
+    if (selectedPages.includes(pageNum)) {
+      setSelectedPages(selectedPages.filter((p) => p !== pageNum));
+    } else {
+      setSelectedPages([...selectedPages, pageNum].sort((a, b) => a - b));
+    }
+  };
 
-      const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, {
-        encoding: FileSystem.EncodingType.Base64,
+  const selectAllPages = () => {
+    if (selectedPages.length === totalPages) {
+      setSelectedPages([]);
+    } else {
+      const all = Array.from({ length: totalPages }, (_, i) => i + 1);
+      setSelectedPages(all);
+    }
+  };
+
+  // Drehen (Links / Rechts) - für markierte Seiten oder alle Seiten
+  const rotateSelectedPages = async (direction) => {
+    if (!previewItem) return;
+    const pagesToRotate = selectedPages.length > 0 
+      ? selectedPages 
+      : Array.from({ length: totalPages }, (_, i) => i + 1);
+
+    const delta = direction === 'left' ? -90 : 90;
+
+    try {
+      const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const pdfDoc = await PDFDocument.load(fileBytes);
+      const allPages = pdfDoc.getPages();
+
+      pagesToRotate.forEach((pageNum) => {
+        const page = allPages[pageNum - 1];
+        if (page) {
+          const currentRotation = page.getRotation().angle;
+          const newRotation = (currentRotation + delta + 360) % 360;
+          page.setRotation(degrees(newRotation));
+        }
       });
 
-      const pdfDoc = await PDFDocument.load(fileBytes);
-      pdfDoc.getPages().forEach((page) => page.setRotation(degrees(nextRot)));
-
-      const modifiedPdfBytes = await pdfDoc.saveAsBase64();
+      const savedBytes = await pdfDoc.saveAsBase64();
       const newUri = `${FileSystem.cacheDirectory}${Date.now()}_rotated.pdf`;
-      await FileSystem.writeAsStringAsync(newUri, modifiedPdfBytes, { encoding: FileSystem.EncodingType.Base64 });
+      await FileSystem.writeAsStringAsync(newUri, savedBytes, { encoding: FileSystem.EncodingType.Base64 });
 
       setPreviewItem({ ...previewItem, uri: newUri });
-    } catch (error) {
+    } catch (err) {
       Alert.alert('Fehler', 'Drehen fehlgeschlagen.');
     }
   };
 
-  // 2. Einzelne Seite löschen
-  const deletePage = async () => {
+  // Markierte Seiten löschen
+  const deleteSelectedPages = async () => {
     if (!previewItem) return;
-    const pageNum = parseInt(targetPage, 10);
+    if (selectedPages.length === 0) {
+      Alert.alert('Hinweis', 'Bitte markiere zuerst mindestens eine Seite.');
+      return;
+    }
+    if (selectedPages.length >= totalPages) {
+      Alert.alert('Fehler', 'Es müssen mindestens 1 Seite im Dokument erhalten bleiben.');
+      return;
+    }
+
     try {
       const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, { encoding: FileSystem.EncodingType.Base64 });
       const pdfDoc = await PDFDocument.load(fileBytes);
-      const totalPages = pdfDoc.getPageCount();
 
-      if (isNaN(pageNum) || pageNum < 1 || pageNum > totalPages) {
-        Alert.alert('Fehler', `Ungültige Seitenzahl (1 - ${totalPages}).`);
-        return;
-      }
-      if (totalPages <= 1) {
-        Alert.alert('Fehler', 'Das Dokument hat nur eine Seite und kann nicht geleert werden.');
-        return;
-      }
+      // Rückwärts löschen, damit sich die Indizes beim Löschen nicht verschieben
+      const sortedDesc = [...selectedPages].sort((a, b) => b - a);
+      sortedDesc.forEach((pageNum) => {
+        pdfDoc.removePage(pageNum - 1);
+      });
 
-      pdfDoc.removePage(pageNum - 1);
       const savedBytes = await pdfDoc.saveAsBase64();
-      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_page_removed.pdf`;
+      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_pages_deleted.pdf`;
       await FileSystem.writeAsStringAsync(newUri, savedBytes, { encoding: FileSystem.EncodingType.Base64 });
 
+      const newTotal = totalPages - selectedPages.length;
+      setTotalPages(newTotal);
+      setSelectedPages([]);
       setPreviewItem({ ...previewItem, uri: newUri });
-      Alert.alert('Erfolg', `Seite ${pageNum} wurde entfernt.`);
+      Alert.alert('Erfolg', 'Markierte Seiten wurden gelöscht.');
     } catch (err) {
-      Alert.alert('Fehler', 'Seitenlöschung fehlgeschlagen.');
+      Alert.alert('Fehler', 'Löschen der Seiten fehlgeschlagen.');
     }
   };
 
-  // 3. Seiten verschieben (Pfeil-Buttons: Richtung = -1 oder +1)
-  const movePage = async (direction) => {
+  // Markierte Seiten verschieben (Richtung -1 = nach oben/links, +1 = nach unten/rechts)
+  const moveSelectedPages = async (direction) => {
     if (!previewItem) return;
-    const pageNum = parseInt(targetPage, 10);
+    if (selectedPages.length === 0) {
+      Alert.alert('Hinweis', 'Bitte markiere eine Seite zum Verschieben.');
+      return;
+    }
+
     try {
       const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, { encoding: FileSystem.EncodingType.Base64 });
       const pdfDoc = await PDFDocument.load(fileBytes);
-      const totalPages = pdfDoc.getPageCount();
-      const srcIndex = pageNum - 1;
-      const destIndex = srcIndex + direction;
+      const pageCount = pdfDoc.getPageCount();
+      const indices = pdfDoc.getPageIndices();
 
-      if (isNaN(pageNum) || srcIndex < 0 || srcIndex >= totalPages || destIndex < 0 || destIndex >= totalPages) {
-        Alert.alert('Hinweis', 'Seitenverschiebung in diese Richtung nicht möglich.');
+      let targetSelected = [...selectedPages];
+      let canMove = true;
+
+      if (direction === -1) {
+        if (targetSelected[0] <= 1) canMove = false;
+      } else {
+        if (targetSelected[targetSelected.length - 1] >= pageCount) canMove = false;
+      }
+
+      if (!canMove) {
+        Alert.alert('Hinweis', 'Verschieben in diese Richtung nicht weiter möglich.');
         return;
       }
 
-      const indices = pdfDoc.getPageIndices();
-      // Umsortieren des Arrays
-      const [moved] = indices.splice(srcIndex, 1);
-      indices.splice(destIndex, 0, moved);
+      // Verschiebe-Index-Array anpassen
+      if (direction === -1) {
+        for (let pageNum of targetSelected) {
+          const idx = pageNum - 1;
+          const temp = indices[idx];
+          indices[idx] = indices[idx - 1];
+          indices[idx - 1] = temp;
+        }
+      } else {
+        for (let i = targetSelected.length - 1; i >= 0; i--) {
+          const pageNum = targetSelected[i];
+          const idx = pageNum - 1;
+          const temp = indices[idx];
+          indices[idx] = indices[idx + 1];
+          indices[idx + 1] = temp;
+        }
+      }
 
       const newPdf = await PDFDocument.create();
       const copiedPages = await newPdf.copyPages(pdfDoc, indices);
       copiedPages.forEach((p) => newPdf.addPage(p));
 
       const savedBytes = await newPdf.saveAsBase64();
-      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_reordered.pdf`;
+      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_moved.pdf`;
       await FileSystem.writeAsStringAsync(newUri, savedBytes, { encoding: FileSystem.EncodingType.Base64 });
 
+      const newSelected = targetSelected.map((p) => p + direction);
+      setSelectedPages(newSelected);
       setPreviewItem({ ...previewItem, uri: newUri });
-      setTargetPage((destIndex + 1).toString());
-      Alert.alert('Erfolg', `Seite ${srcIndex + 1} verschoben nach Position ${destIndex + 1}.`);
     } catch (err) {
       Alert.alert('Fehler', 'Verschieben fehlgeschlagen.');
-    }
-  };
-
-  // 4. Seiten extrahieren
-  const extractPages = async () => {
-    if (!previewItem) return;
-    const start = parseInt(extractStart, 10);
-    const end = parseInt(extractEnd, 10);
-    try {
-      const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, { encoding: FileSystem.EncodingType.Base64 });
-      const pdfDoc = await PDFDocument.load(fileBytes);
-      const totalPages = pdfDoc.getPageCount();
-
-      if (isNaN(start) || isNaN(end) || start < 1 || end > totalPages || start > end) {
-        Alert.alert('Fehler', `Ungültiger Bereich (1 - ${totalPages}).`);
-        return;
-      }
-
-      const newPdf = await PDFDocument.create();
-      const rangeIndices = [];
-      for (let i = start - 1; i <= end - 1; i++) rangeIndices.push(i);
-
-      const copiedPages = await newPdf.copyPages(pdfDoc, rangeIndices);
-      copiedPages.forEach((p) => newPdf.addPage(p));
-
-      const savedBytes = await newPdf.saveAsBase64();
-      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_extracted.pdf`;
-      await FileSystem.writeAsStringAsync(newUri, savedBytes, { encoding: FileSystem.EncodingType.Base64 });
-
-      const now = new Date();
-      const extractedItem = {
-        id: Date.now().toString(),
-        title: `${previewItem.title} (Seiten ${start}-${end})`,
-        uri: newUri,
-        fileName: 'extrahiert.pdf',
-        date: `${now.toLocaleDateString('de-DE')}, ${now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`,
-        timestamp: now.getTime()
-      };
-
-      const updated = [extractedItem, ...pdfs];
-      setPdfs(updated);
-      savePdfs(updated);
-      Alert.alert('Erfolg', 'Seitenbereich als neues Dokument extrahiert!');
-    } catch (err) {
-      Alert.alert('Fehler', 'Extrahieren fehlgeschlagen.');
-    }
-  };
-
-  // 5. Dateigröße optimieren (Komprimieren)
-  const optimizePdfSize = async () => {
-    if (!previewItem) return;
-    try {
-      const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, { encoding: FileSystem.EncodingType.Base64 });
-      const pdfDoc = await PDFDocument.load(fileBytes);
-      const optimizedBytes = await pdfDoc.save({ useObjectStreams: true });
-      const base64Data = Buffer.from(optimizedBytes).toString('base64');
-
-      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_optimized.pdf`;
-      await FileSystem.writeAsStringAsync(newUri, base64Data, { encoding: FileSystem.EncodingType.Base64 });
-
-      setPreviewItem({ ...previewItem, uri: newUri });
-      Alert.alert('Optimiert', 'Die PDF-Struktur wurde komprimiert.');
-    } catch (err) {
-      Alert.alert('Fehler', 'Optimierung fehlgeschlagen.');
-    }
-  };
-
-  // 6. Text / Aufnahmedatum stempeln
-  const addTextStamp = async () => {
-    if (!previewItem || !stampText.trim()) {
-      Alert.alert('Hinweis', 'Bitte Text eingeben.');
-      return;
-    }
-    const pageNum = parseInt(targetPage, 10);
-    try {
-      const fileBytes = await FileSystem.readAsStringAsync(previewItem.uri, { encoding: FileSystem.EncodingType.Base64 });
-      const pdfDoc = await PDFDocument.load(fileBytes);
-      const totalPages = pdfDoc.getPageCount();
-
-      if (isNaN(pageNum) || pageNum < 1 || pageNum > totalPages) {
-        Alert.alert('Fehler', 'Ungültige Seitenzahl.');
-        return;
-      }
-
-      const page = pdfDoc.getPage(pageNum - 1);
-      page.drawText(stampText, {
-        x: 50,
-        y: 50,
-        size: 16,
-        color: rgb(0.8, 0.1, 0.1),
-      });
-
-      const savedBytes = await pdfDoc.saveAsBase64();
-      const newUri = `${FileSystem.cacheDirectory}${Date.now()}_stamped.pdf`;
-      await FileSystem.writeAsStringAsync(newUri, savedBytes, { encoding: FileSystem.EncodingType.Base64 });
-
-      setPreviewItem({ ...previewItem, uri: newUri });
-      setStampText('');
-      Alert.alert('Erfolg', 'Text-Stempel eingefügt.');
-    } catch (err) {
-      Alert.alert('Fehler', 'Stempeln fehlgeschlagen.');
     }
   };
 
@@ -404,7 +357,7 @@ export default function App() {
     const updatedPdfs = pdfs.map((p) => (p.id === previewItem.id ? previewItem : p));
     setPdfs(updatedPdfs);
     savePdfs(updatedPdfs);
-    Alert.alert('Gespeichert', 'Die Änderungen wurden dauerhaft in der Liste übernommen.');
+    Alert.alert('Gespeichert', 'Die Änderungen wurden in der Liste übernommen.');
   };
 
   const toggleSelectForMerge = (id) => {
@@ -491,7 +444,6 @@ export default function App() {
     ]);
   };
 
-  // Sortierte Liste berechnen
   const sortedPdfs = [...pdfs].sort((a, b) => {
     if (sortBy === 'newest') return (b.timestamp || 0) - (a.timestamp || 0);
     if (sortBy === 'oldest') return (a.timestamp || 0) - (b.timestamp || 0);
@@ -610,7 +562,7 @@ export default function App() {
         </View>
       </ScrollView>
 
-      {/* VORSCHAU & PROFESSOR-EDITOR MODAL */}
+      {/* VORSCHAU & SEITEN-BEARBEITUNGS-MODAL */}
       <Modal visible={previewItem !== null} animationType="slide" transparent={false}>
         <SafeAreaView style={[styles.modalContainer, currentStyles.container]}>
           <View style={[styles.modalHeader, currentStyles.modalHeader]}>
@@ -620,21 +572,34 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          {/* Sub-Tabs im Modal */}
-          <View style={styles.modalSubTabs}>
-            <TouchableOpacity style={[styles.subTabBtn, activeTab === 'view' && styles.subTabActive]} onPress={() => setActiveTab('view')}>
-              <Text style={styles.subTabText}>Ansicht</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.subTabBtn, activeTab === 'edit' && styles.subTabActive]} onPress={() => setActiveTab('edit')}>
-              <Text style={styles.subTabText}>Seiten</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.subTabBtn, activeTab === 'extract' && styles.subTabActive]} onPress={() => setActiveTab('extract')}>
-              <Text style={styles.subTabText}>Extrahieren</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.subTabBtn, activeTab === 'stamp' && styles.subTabActive]} onPress={() => setActiveTab('stamp')}>
-              <Text style={styles.subTabText}>Stempel</Text>
+          {/* Seiten-Markierungsauswahl */}
+          <View style={styles.pageSelectionHeader}>
+            <Text style={styles.pageSelectionText}>
+              Seiten markieren ({selectedPages.length}/{totalPages}):
+            </Text>
+            <TouchableOpacity style={styles.selectAllBtn} onPress={selectAllPages}>
+              <Text style={styles.selectAllBtnText}>
+                {selectedPages.length === totalPages ? 'Keine' : 'Alle markieren'}
+              </Text>
             </TouchableOpacity>
           </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pagePillsScrollView}>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+              const isSelected = selectedPages.includes(pageNum);
+              return (
+                <TouchableOpacity
+                  key={pageNum}
+                  style={[styles.pagePill, isSelected && styles.pagePillSelected]}
+                  onPress={() => togglePageSelection(pageNum)}
+                >
+                  <Text style={[styles.pagePillText, isSelected && styles.pagePillTextSelected]}>
+                    S. {pageNum}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
 
           <View style={styles.pdfViewerContainer}>
             {previewItem && (
@@ -646,80 +611,44 @@ export default function App() {
             )}
           </View>
 
-          {/* Dynamische Toolbar unten je nach Tab */}
+          {/* Steuerung & Bearbeitung unten */}
           <View style={[styles.modalFooter, currentStyles.modalFooter]}>
-            {activeTab === 'view' && (
-              <>
-                <TouchableOpacity style={styles.rotateModalButton} onPress={rotateInPreview}>
-                  <Text style={styles.rotateModalButtonText}>🔄 90° Drehen ({currentRotation}°)</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.applyModalButton} onPress={saveRotatedChanges}>
-                  <Text style={styles.applyModalButtonText}>✔️ In Liste übernehmen</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.saveModalButton} onPress={() => savePdfToDeviceFolder(previewItem)}>
-                  <Text style={styles.saveModalButtonText}>💾 Auf Handy speichern</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            {/* Drehen-Buttons */}
+            <View style={styles.inlineRow}>
+              <TouchableOpacity style={[styles.rotateBtn, { marginRight: 4 }]} onPress={() => rotateSelectedPages('left')}>
+                <Text style={styles.rotateBtnText}>↺ 90° Links</Text>
+              </TouchableOpacity>
 
-            {activeTab === 'edit' && (
-              <View style={{ width: '100%' }}>
-                <View style={styles.inlineRow}>
-                  <Text style={[styles.labelSmall, currentStyles.text]}>Ziel-Seite:</Text>
-                  <TextInput
-                    style={[styles.inputSmall, currentStyles.card, currentStyles.text]}
-                    value={targetPage}
-                    onChangeText={setTargetPage}
-                    keyboardType="numeric"
-                  />
-                  <TouchableOpacity style={styles.miniBtnRed} onPress={deletePage}>
-                    <Text style={styles.miniBtnText}>Seiten-Löschen</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={[styles.inlineRow, { marginTop: 6 }]}>
-                  <TouchableOpacity style={[styles.miniBtnBlue, { flex: 1, marginRight: 4 }]} onPress={() => movePage(-1)}>
-                    <Text style={styles.miniBtnText}>◀ Seite nach links/oben</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.miniBtnBlue, { flex: 1, marginLeft: 4 }]} onPress={() => movePage(1)}>
-                    <Text style={styles.miniBtnText}>Seite nach rechts/unten ▶</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
+              <TouchableOpacity style={[styles.rotateBtn, { marginLeft: 4 }]} onPress={() => rotateSelectedPages('right')}>
+                <Text style={styles.rotateBtnText}>↻ 90° Rechts</Text>
+              </TouchableOpacity>
+            </View>
 
-            {activeTab === 'extract' && (
-              <View style={{ width: '100%' }}>
-                <View style={styles.inlineRow}>
-                  <Text style={[styles.labelSmall, currentStyles.text]}>Von:</Text>
-                  <TextInput style={[styles.inputSmall, currentStyles.card, currentStyles.text]} value={extractStart} onChangeText={setExtractStart} keyboardType="numeric" />
-                  <Text style={[styles.labelSmall, currentStyles.text, { marginLeft: 10 }]}>Bis:</Text>
-                  <TextInput style={[styles.inputSmall, currentStyles.card, currentStyles.text]} value={extractEnd} onChangeText={setExtractEnd} keyboardType="numeric" />
-                </View>
-                <TouchableOpacity style={[styles.applyModalButton, { marginTop: 6 }]} onPress={extractPages}>
-                  <Text style={styles.applyModalButtonText}>✂️ Seitenbereich extrahieren</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+            {/* Verschieben & Löschen der markierten Seiten */}
+            <View style={[styles.inlineRow, { marginTop: 6 }]}>
+              <TouchableOpacity style={[styles.miniBtnBlue, { flex: 1, marginRight: 4 }]} onPress={() => moveSelectedPages(-1)}>
+                <Text style={styles.miniBtnText}>◀ Nach vorne</Text>
+              </TouchableOpacity>
 
-            {activeTab === 'stamp' && (
-              <View style={{ width: '100%' }}>
-                <View style={styles.inlineRow}>
-                  <TextInput
-                    style={[styles.inputLarge, currentStyles.card, currentStyles.text]}
-                    placeholder="Text / Datum eingeben..."
-                    placeholderTextColor="#9ca3af"
-                    value={stampText}
-                    onChangeText={setStampText}
-                  />
-                  <TouchableOpacity style={styles.miniBtnGreen} onPress={addTextStamp}>
-                    <Text style={styles.miniBtnText}>Stempeln</Text>
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity style={[styles.rotateModalButton, { marginTop: 6 }]} onPress={optimizePdfSize}>
-                  <Text style={styles.rotateModalButtonText}>🗜️ Dateigröße komprimieren</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+              <TouchableOpacity style={[styles.miniBtnBlue, { flex: 1, marginHorizontal: 4 }]} onPress={() => moveSelectedPages(1)}>
+                <Text style={styles.miniBtnText}>Nach hinten ▶</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.miniBtnRed, { flex: 1, marginLeft: 4 }]} onPress={deleteSelectedPages}>
+                <Text style={styles.miniBtnText}>🗑️ Löschen</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Speichern in App & Handy */}
+            <View style={[styles.inlineRow, { marginTop: 8 }]}>
+              <TouchableOpacity style={[styles.applyModalButton, { flex: 1, marginRight: 4 }]} onPress={saveRotatedChanges}>
+                <Text style={styles.applyModalButtonText}>✔️ In Liste übernehmen</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.saveModalButton, { flex: 1, marginLeft: 4 }]} onPress={() => savePdfToDeviceFolder(previewItem)}>
+                <Text style={styles.saveModalButtonText}>💾 Auf Handy speichern</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </SafeAreaView>
       </Modal>
@@ -787,25 +716,26 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 10 },
   closeTopButton: { padding: 6 },
   closeTopButtonText: { fontSize: 14, fontWeight: '600', color: '#ef4444' },
-  modalSubTabs: { flexDirection: 'row', backgroundColor: '#374151' },
-  subTabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center' },
-  subTabActive: { backgroundColor: '#2563eb' },
-  subTabText: { color: '#ffffff', fontSize: 13, fontWeight: '600' },
-  pdfViewerContainer: { flex: 1, backgroundColor: '#374151' },
+  pageSelectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, backgroundColor: '#374151' },
+  pageSelectionText: { color: '#ffffff', fontSize: 12, fontWeight: '600' },
+  selectAllBtn: { paddingVertical: 2, paddingHorizontal: 8, backgroundColor: '#4b5563', borderRadius: 4 },
+  selectAllBtnText: { color: '#ffffff', fontSize: 11 },
+  pagePillsScrollView: { backgroundColor: '#374151', paddingHorizontal: 12, paddingVertical: 8, maxHeight: 46 },
+  pagePill: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, backgroundColor: '#4b5563', marginRight: 6, height: 28 },
+  pagePillSelected: { backgroundColor: '#2563eb' },
+  pagePillText: { color: '#d1d5db', fontSize: 12, fontWeight: '600' },
+  pagePillTextSelected: { color: '#ffffff' },
+  pdfViewerContainer: { flex: 1, backgroundColor: '#111827' },
   pdfViewer: { flex: 1, width: '100%', height: '100%' },
   modalFooter: { padding: 12, borderTopWidth: 1 },
-  rotateModalButton: { backgroundColor: '#4b5563', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginBottom: 6 },
-  rotateModalButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '600' },
-  applyModalButton: { backgroundColor: '#2563eb', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginBottom: 6 },
+  rotateBtn: { flex: 1, backgroundColor: '#4b5563', borderRadius: 6, paddingVertical: 8, alignItems: 'center' },
+  rotateBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '600' },
+  applyModalButton: { backgroundColor: '#2563eb', borderRadius: 6, paddingVertical: 10, alignItems: 'center' },
   applyModalButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '600' },
-  saveModalButton: { backgroundColor: '#10b981', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
+  saveModalButton: { backgroundColor: '#10b981', borderRadius: 6, paddingVertical: 10, alignItems: 'center' },
   saveModalButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '600' },
   inlineRow: { flexDirection: 'row', alignItems: 'center', width: '100%' },
-  labelSmall: { fontSize: 13, fontWeight: '600', marginRight: 6 },
-  inputSmall: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, width: 60, textAlign: 'center', marginRight: 10 },
-  inputLarge: { flex: 1, borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, marginRight: 8, fontSize: 13 },
-  miniBtnRed: { backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6 },
+  miniBtnRed: { backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 6, alignItems: 'center' },
   miniBtnBlue: { backgroundColor: '#2563eb', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 6, alignItems: 'center' },
-  miniBtnGreen: { backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6 },
   miniBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '600' },
 });
