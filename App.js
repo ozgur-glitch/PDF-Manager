@@ -46,7 +46,7 @@ export default function App() {
     }
   };
 
-  // Funktion zum Auswählen einer PDF-Datei vom Smartphone
+  // Funktion zum Auswählen einer PDF-Datei direkt vom Smartphone-Speicher
   const pickDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -57,7 +57,7 @@ export default function App() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
         setSelectedFile(file);
-        // Automatisch den Dateinamen als Titel vorschlagen, falls leer
+        // Automatisch den Dateinamen als Titel vorschlagen, falls das Titel-Feld leer ist
         if (!title.trim()) {
           setTitle(file.name.replace(/\.[^/.]+$/, ''));
         }
@@ -86,7 +86,7 @@ export default function App() {
     setPdfs(updatedPdfs);
     savePdfs(updatedPdfs);
 
-    // Felder zurücksetzen
+    // Eingabefelder zurücksetzen
     setTitle('');
     setSelectedFile(null);
   };
