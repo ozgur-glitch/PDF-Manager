@@ -21,6 +21,7 @@ import { PDFDocument, degrees } from 'pdf-lib';
 
 const STORAGE_KEY = '@pdf_manager_files';
 const THEME_KEY = '@pdf_manager_theme';
+const DIRECTORY_KEY = '@pdf_manager_saved_directory';
 
 export default function App() {
   const [pdfs, setPdfs] = useState([]);
@@ -109,7 +110,6 @@ export default function App() {
 
   const takePhotoAndSaveAsPdf = async () => {
     try {
-      // Startet den Scanner mit automatischer Kanten-Erkennung und manuellem Feinschnitt
       const { scannedImages } = await DocumentScanner.scanDocument({
         maxNumDocuments: 1,
         croppedImageQuality: 90,
@@ -155,23 +155,29 @@ export default function App() {
         savePdfs(updatedPdfs);
         Alert.alert('Erfolg', 'Dokument wurde automatisch erkannt und als PDF gespeichert!');
       }
-    } catch (error) {
-      // Benutzer hat den Scan ggf. abgebrochen
-    }
+    } catch (error) {}
   };
 
   const savePdfToDeviceFolder = async (item) => {
     try {
       if (Platform.OS === 'android') {
-        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-        if (!permissions.granted) return;
+        let directoryUri = await AsyncStorage.getItem(DIRECTORY_KEY);
+
+        // Falls noch kein Ordner gemerkt wurde, einmalig abfragen
+        if (!directoryUri) {
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          if (!permissions.granted) return;
+
+          directoryUri = permissions.directoryUri;
+          await AsyncStorage.setItem(DIRECTORY_KEY, directoryUri);
+        }
 
         const base64Data = await FileSystem.readAsStringAsync(item.uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
         const targetUri = await FileSystem.StorageAccessFramework.createFileAsync(
-          permissions.directoryUri,
+          directoryUri,
           item.fileName || 'dokument.pdf',
           'application/pdf'
         );
@@ -180,10 +186,12 @@ export default function App() {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        Alert.alert('Erfolg', 'PDF wurde erfolgreich im Handy-Ordner gespeichert!');
+        Alert.alert('Erfolg', 'PDF wurde erfolgreich im gewählten Ordner gespeichert!');
       }
     } catch (error) {
-      Alert.alert('Fehler', 'Speichern fehlgeschlagen.');
+      // Wenn der gespeicherte Ordner ungültig geworden ist, Berechtigung zurücksetzen
+      await AsyncStorage.removeItem(DIRECTORY_KEY);
+      Alert.alert('Hinweis', 'Ordner-Zugriff wurde erneuert. Bitte speichere erneut.');
     }
   };
 
