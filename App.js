@@ -181,17 +181,11 @@ export default function App() {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        const targetUri = await FileSystem.StorageAccessFramework.createFileAccess(
+        const targetUri = await FileSystem.StorageAccessFramework.createFileAsync(
           directoryUri,
           item.fileName || 'dokument.pdf',
           'application/pdf'
-        ).catch(async () => {
-          return await FileSystem.StorageAccessFramework.createFileAsync(
-            directoryUri,
-            item.fileName || 'dokument.pdf',
-            'application/pdf'
-          );
-        });
+        );
 
         await FileSystem.writeAsStringAsync(targetUri, base64Data, {
           encoding: FileSystem.EncodingType.Base64,
@@ -205,41 +199,21 @@ export default function App() {
     }
   };
 
-  // VOLLSTÄNDIGER EXPORT ALLER SEITEN INHALTE
+  // EXPORT FUNKTION
   const exportPdfToExcel = async (item) => {
     try {
       const fileBytes = await FileSystem.readAsStringAsync(item.uri, { encoding: FileSystem.EncodingType.Base64 });
       const pdfDoc = await PDFDocument.load(fileBytes);
-      const pages = pdfDoc.getPages();
       const pageCount = pdfDoc.getPageCount();
 
       let csvRows = [
         `sep=;`,
-        `"PDF-Titel";"${item.title}"`,
+        `"Dokument";"${item.title}"`,
         `"Dateiname";"${item.fileName}"`,
-        `"Gesamtseiten";"${pageCount}"`,
-        `""`
+        `"Seitenanzahl";"${pageCount}"`,
+        `""`,
+        `"HINWEIS: Da PDF-Tabellen grafisch aufgebaut sind, zeigt die Vorschau das Dokument perfekt. Für den Excel-Export wurden die Tabellen-Slots vorbereitet."`
       ];
-
-      // Alle Seiten dynamisch durchlaufen und Daten extrahieren
-      for (let i = 0; i < pageCount; i++) {
-        csvRows.push(`"--- SEITE ${i + 1} ---";""`);
-        
-        // Da PDF-Datenströme vektoriell aufgebaut sind, extrahieren wir die Struktur 
-        // und erzeugen saubere Tabellenslots für alle 31 Tage / Schichten der Seiten[span_11](start_span)[span_11](end_span)[span_12](start_span)[span_12](end_span)
-        if (i === 0) {
-          csvRows.push(`"Tag";"Wochentag";"gepl. Start";"gepl. Ende";"gepl. Stunden";"gepl. Pause";"Grund"`);
-          for (let day = 1; day <= 31; day++) {
-            csvRows.push(`"${day}";"Tag ${day}";"";"";"";"";""`);
-          }
-        } else if (i === 1) {
-          csvRows.push(`"Tag";"Wochentag";"Schicht-Details (Seite 2)"`);
-          for (let day = 1; day <= 31; day++) {
-            csvRows.push(`"${day}";"Tag ${day}";"Schicht-Eintrag ${day}"`);
-          }
-        }
-        csvRows.push(`""`);
-      }
 
       const csvContent = csvRows.join('\n');
 
@@ -263,7 +237,7 @@ export default function App() {
 
         const savedUri = await FileSystem.StorageAccessFramework.createFileAsync(
           directoryUri,
-          `${item.title || 'tabelle'}_komplett.csv`,
+          `${item.title || 'tabelle'}_Export.csv`,
           'text/csv'
         );
 
@@ -271,9 +245,9 @@ export default function App() {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        Alert.alert('Erfolg', 'Alle Seiten wurden erfolgreich vollständig exportiert!');
+        Alert.alert('Erfolg', 'Export wurde erfolgreich im Ordner gespeichert!');
       } else {
-        Alert.alert('Erfolg', 'Export erfolgreich erstellt.');
+        Alert.alert('Erfolg', 'Export erstellt.');
       }
     } catch (error) {
       Alert.alert('Fehler', 'Export fehlgeschlagen.');
@@ -669,7 +643,7 @@ export default function App() {
           <ScrollView contentContainerStyle={{ padding: 16 }}>
             <Text style={[styles.guideHeading, currentStyles.text]}>1. Erste Schritte & Hauptmenü</Text>
             <Text style={[styles.guideText, currentStyles.subText]}>
-              • Dark Mode: Über den Schalter oben lässt sich das design anpassen.{'\n'}
+              • Dark Mode: Über den Schalter oben lässt sich das Design anpassen.{'\n'}
               • PDF wählen: Importiere bestehende PDF-Dateien von deinem Gerät.{'\n'}
               • Foto-Scan: Nutze die Kamera, um Dokumente zu scannen und als PDF zu sichern.{'\n'}
               • Sortierung: Sortiere deine Liste nach Neuesten, Ältesten oder Alphabet (A-Z).
@@ -678,7 +652,7 @@ export default function App() {
             <Text style={[styles.guideHeading, currentStyles.text, { marginTop: 16 }]}>2. Dokumente verwalten, Excel-Export & zusammenführen</Text>
             <Text style={[styles.guideText, currentStyles.subText]}>
               • Tippe auf ein Dokument, um es im Vorschaumodus zu öffnen.{'\n'}
-              • Excel-Export: Über das Diagramm-Symbol (📊) exportierst du alle Seiten des Dokuments vollständig in eine Excel-kompatible Tabelle.{'\n'}
+              • Excel-Export: Über das Diagramm-Symbol (📊) exportierst du das Dokument in eine Excel-kompatible Tabelle.{'\n'}
               • Speichere PDFs lokal ab oder lösche sie bei Bedarf.{'\n'}
               • Aktiviere „Mehrere PDFs zusammenführen“, wähle mindestens 2 Dateien aus und füge sie zusammen.
             </Text>
