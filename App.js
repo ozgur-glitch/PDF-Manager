@@ -199,61 +199,6 @@ export default function App() {
     }
   };
 
-  // EXPORT FUNKTION
-  const exportPdfToExcel = async (item) => {
-    try {
-      const fileBytes = await FileSystem.readAsStringAsync(item.uri, { encoding: FileSystem.EncodingType.Base64 });
-      const pdfDoc = await PDFDocument.load(fileBytes);
-      const pageCount = pdfDoc.getPageCount();
-
-      let csvRows = [
-        `sep=;`,
-        `"Dokument";"${item.title}"`,
-        `"Dateiname";"${item.fileName}"`,
-        `"Seitenanzahl";"${pageCount}"`,
-        `""`,
-        `"HINWEIS: Da PDF-Tabellen grafisch aufgebaut sind, zeigt die Vorschau das Dokument perfekt. Für den Excel-Export wurden die Tabellen-Slots vorbereitet."`
-      ];
-
-      const csvContent = csvRows.join('\n');
-
-      const targetUri = `${FileSystem.cacheDirectory}${item.title || 'tabelle'}_export.csv`;
-      await FileSystem.writeAsStringAsync(targetUri, csvContent, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-
-      if (Platform.OS === 'android') {
-        let directoryUri = await AsyncStorage.getItem(DIRECTORY_KEY);
-        if (!directoryUri) {
-          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-          if (!permissions.granted) return;
-          directoryUri = permissions.directoryUri;
-          await AsyncStorage.setItem(DIRECTORY_KEY, directoryUri);
-        }
-
-        const base64Data = await FileSystem.readAsStringAsync(targetUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-
-        const savedUri = await FileSystem.StorageAccessFramework.createFileAsync(
-          directoryUri,
-          `${item.title || 'tabelle'}_Export.csv`,
-          'text/csv'
-        );
-
-        await FileSystem.writeAsStringAsync(savedUri, base64Data, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-
-        Alert.alert('Erfolg', 'Export wurde erfolgreich im Ordner gespeichert!');
-      } else {
-        Alert.alert('Erfolg', 'Export erstellt.');
-      }
-    } catch (error) {
-      Alert.alert('Fehler', 'Export fehlgeschlagen.');
-    }
-  };
-
   const openPreview = async (item) => {
     try {
       const fileBytes = await FileSystem.readAsStringAsync(item.uri, { encoding: FileSystem.EncodingType.Base64 });
@@ -604,9 +549,6 @@ export default function App() {
 
               {!isMergingMode && (
                 <View style={styles.actionButtons} onStartShouldSetResponder={() => true}>
-                  <TouchableOpacity style={styles.iconButton} onPress={() => exportPdfToExcel(item)} title="Excel Export">
-                    <Text style={styles.iconText}>📊</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity style={styles.iconButton} onPress={() => savePdfToDeviceFolder(item)}>
                     <Text style={styles.iconText}>💾</Text>
                   </TouchableOpacity>
@@ -649,12 +591,11 @@ export default function App() {
               • Sortierung: Sortiere deine Liste nach Neuesten, Ältesten oder Alphabet (A-Z).
             </Text>
 
-            <Text style={[styles.guideHeading, currentStyles.text, { marginTop: 16 }]}>2. Dokumente verwalten, Excel-Export & zusammenführen</Text>
+            <Text style={[styles.guideHeading, currentStyles.text, { marginTop: 16 }]}>2. Dokumente verwalten & zusammenführen</Text>
             <Text style={[styles.guideText, currentStyles.subText]}>
               • Tippe auf ein Dokument, um es im Vorschaumodus zu öffnen.{'\n'}
-              • Excel-Export: Über das Diagramm-Symbol (📊) exportierst du das Dokument in eine Excel-kompatible Tabelle.{'\n'}
               • Speichere PDFs lokal ab oder lösche sie bei Bedarf.{'\n'}
-              • Aktiviere „Mehrere PDFs zusammenführen“, wähle mindestens 2 Dateien aus und füge sie zusammen.
+              • Aktiviere „Mehrere PDFs zusammenführen“, wähle mindestens 2 Dateien aus und füge sie zu einer einzigen PDF-Datei zusammen.
             </Text>
 
             <Text style={[styles.guideHeading, currentStyles.text, { marginTop: 16 }]}>3. Vorschaumodus & Seiten-Editor</Text>
@@ -720,15 +661,13 @@ export default function App() {
 
           {/* Steuerung & Bearbeitung unten */}
           <View style={[styles.modalFooter, currentStyles.modalFooter]}>
-            {/* Excel & Drehen Buttons */}
+            {/* Drehen-Buttons */}
             <View style={styles.inlineRow}>
-              <TouchableOpacity style={[styles.rotateBtn, { backgroundColor: '#059669', marginRight: 4 }]} onPress={() => exportPdfToExcel(previewItem)}>
-                <Text style={styles.rotateBtnText}>📊 Excel-Export</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.rotateBtn, { marginHorizontal: 2 }]} onPress={() => rotateSelectedPages('left')}>
+              <TouchableOpacity style={[styles.rotateBtn, { marginRight: 4 }]} onPress={() => rotateSelectedPages('left')}>
                 <Text style={styles.rotateBtnText}>↺ 90° Links</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.rotateBtn, { marginLeft: 2 }]} onPress={() => rotateSelectedPages('right')}>
+
+              <TouchableOpacity style={[styles.rotateBtn, { marginLeft: 4 }]} onPress={() => rotateSelectedPages('right')}>
                 <Text style={styles.rotateBtnText}>↻ 90° Rechts</Text>
               </TouchableOpacity>
             </View>
