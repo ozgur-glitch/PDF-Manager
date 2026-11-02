@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -27,6 +27,12 @@ export default function App() {
   const [pdfs, setPdfs] = useState([]);
   const [previewItem, setPreviewItem] = useState(null);
   const [totalPages, setTotalPages] = useState(1);
+
+  // Zustand für das Benutzerhandbuch-Modal
+  const [isGuideVisible, setIsGuideVisible] = useState(false);
+
+  // Referenz für den PDF-Viewer, um zu bestimmten Seiten zu springen
+  const pdfRef = useRef(null);
 
   // Markierte Seiten im Vorschaumodus (Array von Seitennummern: [1, 3, 5])
   const [selectedPages, setSelectedPages] = useState([]);
@@ -163,7 +169,6 @@ export default function App() {
       if (Platform.OS === 'android') {
         let directoryUri = await AsyncStorage.getItem(DIRECTORY_KEY);
 
-        // Falls noch kein Ordner gemerkt wurde, einmalig abfragen
         if (!directoryUri) {
           const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
           if (!permissions.granted) return;
@@ -189,7 +194,6 @@ export default function App() {
         Alert.alert('Erfolg', 'PDF wurde erfolgreich im gewählten Ordner gespeichert!');
       }
     } catch (error) {
-      // Wenn der gespeicherte Ordner ungültig geworden ist, Berechtigung zurücksetzen
       await AsyncStorage.removeItem(DIRECTORY_KEY);
       Alert.alert('Hinweis', 'Ordner-Zugriff wurde erneuert. Bitte speichere erneut.');
     }
@@ -208,6 +212,10 @@ export default function App() {
   };
 
   const togglePageSelection = (pageNum) => {
+    if (pdfRef.current) {
+      pdfRef.current.setPage(pageNum);
+    }
+
     if (selectedPages.includes(pageNum)) {
       setSelectedPages(selectedPages.filter((p) => p !== pageNum));
     } else {
@@ -475,6 +483,11 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
+        {/* Anleitung Button */}
+        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#4f46e5', marginBottom: 12 }]} onPress={() => setIsGuideVisible(true)}>
+          <Text style={styles.actionBtnText}>📖 Benutzerhandbuch öffnen</Text>
+        </TouchableOpacity>
+
         {/* Sortier-Buttons */}
         <View style={[styles.sortContainer, currentStyles.card]}>
           <Text style={[styles.sortLabel, currentStyles.text]}>Sortierung:</Text>
@@ -560,6 +573,42 @@ export default function App() {
         </View>
       </ScrollView>
 
+      {/* BENUTZERHANDBUCH MODAL */}
+      <Modal visible={isGuideVisible} animationType="slide" transparent={false}>
+        <SafeAreaView style={[styles.modalContainer, currentStyles.container]}>
+          <View style={[styles.modalHeader, currentStyles.modalHeader]}>
+            <Text style={[styles.modalTitle, currentStyles.text]}>📖 Benutzerhandbuch</Text>
+            <TouchableOpacity style={styles.closeTopButton} onPress={() => setIsGuideVisible(false)}>
+              <Text style={styles.closeTopButtonText}>✕ Schließen</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            <Text style={[styles.guideHeading, currentStyles.text]}>1. Erste Schritte & Hauptmenü</Text>
+            <Text style={[styles.guideText, currentStyles.subText]}>
+              • Dark Mode: Über den Schalter oben lässt sich das Design anpassen.{'\n'}
+              • PDF wählen: Importiere bestehende PDF-Dateien von deinem Gerät.{'\n'}
+              • Foto-Scan: Nutze die Kamera, um Dokumente zu scannen und als PDF zu sichern.{'\n'}
+              • Sortierung: Sortiere deine Liste nach Neuesten, Ältesten oder Alphabet (A-Z).
+            </Text>
+
+            <Text style={[styles.guideHeading, currentStyles.text, { marginTop: 16 }]}>2. Dokumente verwalten & zusammenführen</Text>
+            <Text style={[styles.guideText, currentStyles.subText]}>
+              • Tippe auf ein Dokument, um es im Vorschaumodus zu öffnen.{'\n'}
+              • Speichere PDFs lokal ab oder lösche sie bei Bedarf.{'\n'}
+              • Aktiviere „Mehrere PDFs zusammenführen“, wähle mindestens 2 Dateien aus und füge sie zu einer einzigen PDF-Datei zusammen.
+            </Text>
+
+            <Text style={[styles.guideHeading, currentStyles.text, { marginTop: 16 }]}>3. Vorschaumodus & Seiten-Editor</Text>
+            <Text style={[styles.guideText, currentStyles.subText]}>
+              • Seiten-Navigation: Tippe auf eine Seitennummer in der oberen Leiste, um sofort zu dieser Seite im Dokument zu springen und sie gleichzeitig zu markieren.{'\n'}
+              • Drehen: Drehe markierte Seiten (oder das gesamte Dokument) um 90° nach links oder rechts.{'\n'}
+              • Verschieben: Ändere die Reihenfolge einzelner Seiten im Dokument.{'\n'}
+              • Löschen: Entferne nicht benötigte Seiten dauerhaft aus der Datei.
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
       {/* VORSCHAU & SEITEN-BEARBEITUNGS-MODAL */}
       <Modal visible={previewItem !== null} animationType="slide" transparent={false}>
         <SafeAreaView style={[styles.modalContainer, currentStyles.container]}>
@@ -602,6 +651,7 @@ export default function App() {
           <View style={styles.pdfViewerContainer}>
             {previewItem && (
               <Pdf
+                ref={pdfRef}
                 trustAllCerts={false}
                 source={{ uri: previewItem.uri, cache: true }}
                 style={styles.pdfViewer}
@@ -736,4 +786,6 @@ const styles = StyleSheet.create({
   miniBtnRed: { backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 6, alignItems: 'center' },
   miniBtnBlue: { backgroundColor: '#2563eb', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 6, alignItems: 'center' },
   miniBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '600' },
+  guideHeading: { fontSize: 15, fontWeight: 'bold' },
+  guideText: { fontSize: 13, marginTop: 4, lineHeight: 18 },
 });
